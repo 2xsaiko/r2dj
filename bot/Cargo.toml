@@ -1,0 +1,29 @@
+[package]
+name = "r2dj"
+version = "0.1.0"
+authors = ["2xsaiko <git@dblsaiko.net>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mumble-protocol = "0.4.1"
+tokio = { version = "1.2.0", features = ["full"] }
+crossbeam = "0.8.0"
+tokio-rustls = "0.22.0"
+webpki-roots = "0.21.0"
+thiserror = "1.0.24"
+tokio-util = { version = "0.6.3", features = ["net"] }
+futures = "0.3.13"
+sysinfo = "0.16.4"
+log = "0.4.14"
+simplelog = "0.9.0"
+bytes = "1.0.1"
+audiopus = "0.2.0"
+byteorder = "1.4.2"
+cmdparser = { git = "https://git.2x.ax/~saiko/cmdparser" }
+uuid = "0.8.2"
+librespot = "0.1.6"
+rand = "0.8.3"
+serde = { version = "1.0.125", features = ["derive"] }
+serde_json = "1.0.64"

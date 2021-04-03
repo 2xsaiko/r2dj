@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::ops::Add;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
 use bytes::{Buf, BytesMut};
 use futures::task::{Context, Poll, Waker};
@@ -72,7 +72,7 @@ fn create_input(shared: Arc<Mutex<Shared>>) -> MixerInput {
     };
     s.buffers.insert(id, shared_input);
     drop(s);
-    debug!("new input ({})", id);
+    debug!("new input {}", id);
     MixerInput { shared, id }
 }
 
@@ -92,7 +92,6 @@ impl AsyncWrite for MixerInput {
         let shared_input = shared.buffers.get_mut(&self.id).unwrap();
 
         if shared_input.closed {
-            debug!("whaaa");
             Poll::Ready(Err(io::Error::new(ErrorKind::BrokenPipe, "Broken pipe")))
         } else if shared_input.buffer.len() < BUFFER_SIZE {
             let to_write = min(buf.len(), BUFFER_SIZE - shared_input.buffer.len());
@@ -155,6 +154,7 @@ impl AsyncRead for MixerOutput {
         shared.cleanup();
 
         if shared.buffers.is_empty() {
+            // EOF (all inputs are closed)
             Poll::Ready(Ok(()))
         } else {
             let now = Instant::now();
@@ -227,13 +227,16 @@ impl AsyncRead for MixerOutput {
 
 impl Shared {
     fn cleanup(&mut self) {
-        let vec = self.buffers
+        // Remove closed inputs where the buffer is empty
+        let vec = self
+            .buffers
             .iter()
             .filter(|(_, v)| v.closed && v.buffer.is_empty())
             .map(|(k, _)| *k)
             .collect::<Vec<_>>();
 
-        for entry in vec{
+        for entry in vec {
+            debug!("collected input {}", entry);
             self.buffers.remove(&entry);
         }
     }

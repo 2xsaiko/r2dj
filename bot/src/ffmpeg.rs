@@ -26,10 +26,10 @@ pub enum Format {
     Pcm16BitBe(u32),
 }
 
-pub async fn ffpipe<I, O>(input: I, output: O, config: FfmpegConfig) -> io::Result<ExitStatus>
+pub async fn ffpipe<'a, I, O>(input: I, output: O, config: FfmpegConfig) -> io::Result<ExitStatus>
 where
-    I: TranscoderInput,
-    O: TranscoderOutput,
+    I: TranscoderInput<'a>,
+    O: TranscoderOutput<'a>,
 {
     let mut ffmpeg = Command::new("ffmpeg");
     ffmpeg.arg("-nostdin");
@@ -54,37 +54,33 @@ where
 
     let mut handle = ffmpeg.spawn()?;
 
-    let stdin_fut = if let Some(stdin) = handle.stdin.take() {
-        Some(tokio::spawn(input.handle_stdin(stdin)))
-    } else {
-        None
+    let stdin = handle.stdin.take();
+    let stdin_fut = async {
+        match stdin {
+            Some(stdin) => input.handle_stdin(stdin).await,
+            None => Ok(()),
+        }
     };
 
-    let stdout_fut = if let Some(stdout) = handle.stdout.take() {
-        Some(tokio::spawn(output.handle_stdout(stdout)))
-    } else {
-        None
+    let stdout = handle.stdout.take();
+    let stdout_fut = async {
+        match stdout {
+            Some(stdout) => output.handle_stdout(stdout).await,
+            None => Ok(()),
+        }
     };
 
-    let mut r = handle.wait().await;
+    let (r, _, _) = tokio::try_join!(handle.wait(), stdin_fut, stdout_fut)?;
 
-    if let Some(stdin_fut) = stdin_fut {
-        r = stdin_fut.await.unwrap().and(r);
-    }
-
-    if let Some(stdout_fut) = stdout_fut {
-        r = stdout_fut.await.unwrap().and(r);
-    }
-
-    r
+    Ok(r)
 }
 
-pub trait TranscoderInput: Sized {
+pub trait TranscoderInput<'a>: Sized {
     fn to_arg(&self) -> &OsStr;
 
     fn pre_spawn(&self, command: &mut Command) {}
 
-    fn handle_stdin(self, stdout: ChildStdin) -> BoxFuture<'static, io::Result<()>> {
+    fn handle_stdin(self, stdout: ChildStdin) -> BoxFuture<'a, io::Result<()>> {
         async { Ok(()) }.boxed()
     }
 }
@@ -103,12 +99,12 @@ pub struct PipeSource<T> {
     pipe: T,
 }
 
-pub trait TranscoderOutput: Sized {
+pub trait TranscoderOutput<'a>: Sized {
     fn to_arg(&self) -> &OsStr;
 
     fn pre_spawn(&self, command: &mut Command) {}
 
-    fn handle_stdout(self, stdout: ChildStdout) -> BoxFuture<'static, io::Result<()>> {
+    fn handle_stdout(self, stdout: ChildStdout) -> BoxFuture<'a, io::Result<()>> {
         async { Ok(()) }.boxed()
     }
 }
@@ -192,7 +188,7 @@ impl Default for Format {
     }
 }
 
-impl<T> TranscoderInput for PathSource<T>
+impl<'a, T> TranscoderInput<'a> for PathSource<T>
 where
     T: AsRef<Path>,
 {
@@ -201,9 +197,9 @@ where
     }
 }
 
-impl<T> TranscoderInput for PipeSource<T>
+impl<'a, T> TranscoderInput<'a> for PipeSource<T>
 where
-    T: AsyncRead + Unpin + Send + 'static,
+    T: AsyncRead + Unpin + Send + 'a,
 {
     fn to_arg(&self) -> &OsStr {
         OsStr::new("-")
@@ -213,12 +209,12 @@ where
         command.stdin(Stdio::piped());
     }
 
-    fn handle_stdin(self, stdin: ChildStdin) -> BoxFuture<'static, io::Result<()>> {
+    fn handle_stdin(self, stdin: ChildStdin) -> BoxFuture<'a, io::Result<()>> {
         connect(self.pipe, stdin).boxed()
     }
 }
 
-impl<T> TranscoderOutput for PathDest<T>
+impl<'a, T> TranscoderOutput<'a> for PathDest<T>
 where
     T: AsRef<Path>,
 {
@@ -227,9 +223,9 @@ where
     }
 }
 
-impl<T> TranscoderOutput for PipeDest<T>
+impl<'a, T> TranscoderOutput<'a> for PipeDest<T>
 where
-    T: AsyncWrite + Unpin + Send + 'static,
+    T: AsyncWrite + Unpin + Send + 'a,
 {
     fn to_arg(&self) -> &OsStr {
         OsStr::new("-")
@@ -239,7 +235,7 @@ where
         command.stdout(Stdio::piped());
     }
 
-    fn handle_stdout(self, stdout: ChildStdout) -> BoxFuture<'static, io::Result<()>> {
+    fn handle_stdout(self, stdout: ChildStdout) -> BoxFuture<'a, io::Result<()>> {
         connect(stdout, self.pipe).boxed()
     }
 }
