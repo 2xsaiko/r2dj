@@ -14,7 +14,8 @@ use tokio::sync::{broadcast, watch};
 use tokio::time::{interval, Duration};
 
 use crate::mumble::server_state::{ChannelRef, ServerState, UserRef};
-use crate::mumble::{AudioSource, AudioState, Event, PacketSink, PacketSource};
+use crate::mumble::{AudioSource, AudioState, PacketSink, PacketSource};
+use crate::mumble::event::Event;
 
 pub(super) async fn tcp_handler(
     mut shutdown_channel: watch::Receiver<()>,

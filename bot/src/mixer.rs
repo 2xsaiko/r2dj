@@ -22,6 +22,7 @@ const CHANNELS: u32 = 1;
 const BUFFER_MS: u32 = 500;
 const BUFFER_SIZE: usize = (FREQUENCY * WORD_SIZE * CHANNELS * BUFFER_MS / 1000) as usize;
 
+#[derive(Debug)]
 struct Shared {
     buffers: HashMap<usize, SharedInput>,
     read_notify: Option<Waker>,
@@ -30,17 +31,20 @@ struct Shared {
     next_input: usize,
 }
 
+#[derive(Debug)]
 struct SharedInput {
     write_notify: Option<Waker>,
     buffer: BytesMut,
     closed: bool,
 }
 
+#[derive(Debug)]
 pub struct MixerInput {
     shared: Arc<Mutex<Shared>>,
     id: usize,
 }
 
+#[derive(Debug)]
 pub struct MixerOutput {
     shared: Arc<Mutex<Shared>>,
 }

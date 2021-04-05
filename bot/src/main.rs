@@ -1,15 +1,13 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
 use log::{info, LevelFilter};
 use simplelog::{Config, TerminalMode};
-use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::ffplayer::{Player, PlayerEvent};
-use crate::mixer::new_mixer;
-use crate::mumble::{MumbleConfig, Event};
-use std::borrow::Cow;
+use crate::ffplayer::Player;
+use crate::mumble::{Event, MumbleConfig};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -48,14 +46,10 @@ async fn main() {
         .unwrap();
     let st = client.server_state();
 
-    let (input, output) = new_mixer();
-
     let mut r = client.event_listener();
 
-    // tokio::spawn(async move {
-    //     client.consume(output).await.unwrap();
-    //     client.close().await;
-    // });
+    let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
+    player.play().await;
 
     while let Ok(ev) = r.recv().await {
         match ev {
@@ -72,7 +66,9 @@ async fn main() {
                 drop(st);
 
                 if actor != Some(client.user()) {
-                    client.send_channel_message(&format!("{}: {}", name, message)).await;
+                    client
+                        .send_channel_message(&format!("{}: {}", name, message))
+                        .await;
                 }
             }
             _ => {}
@@ -80,51 +76,6 @@ async fn main() {
     }
 
     client.close().await;
-
-    // let mut player = Player::new("04 - Bone Dry.mp3", input).unwrap();
-    // player.seek(Duration::from_secs(60 * 4 + 30)).await;
-    //
-    // let mut stdin = BufReader::new(tokio::io::stdin());
-    // let mut buf = String::new();
-    //
-    // loop {
-    //     println!(
-    //         "{} / {}",
-    //         FmtDuration(player.length()),
-    //         FmtDuration(player.position().await)
-    //     );
-    //     buf.clear();
-    //     stdin.read_line(&mut buf).await.unwrap();
-    //     player.play().await;
-    //     println!(
-    //         "{} / {}",
-    //         FmtDuration(player.length()),
-    //         FmtDuration(player.position().await)
-    //     );
-    //     buf.clear();
-    //     let mut l = player.event_listener();
-    //     loop {
-    //         tokio::select! {
-    //             _ = stdin.read_line(&mut buf) => {
-    //                 player.pause().await;
-    //                 break;
-    //             },
-    //             msg = l.recv() => {
-    //                 println!("{:?}", msg);
-    //                 let msg = msg.unwrap();
-    //                 match msg {
-    //                     PlayerEvent::Playing { .. } => {}
-    //                     PlayerEvent::Paused { stopped, .. } => {
-    //                         if stopped {
-    //                             player.seek(Duration::from_secs(0)).await;
-    //                         }
-    //                         break;
-    //                     }
-    //                 }
-    //             },
-    //         }
-    //     }
-    // }
 }
 
 struct FmtDuration(Duration);
