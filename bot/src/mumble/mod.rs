@@ -1,41 +1,37 @@
-use std::io::Error;
 use std::net::SocketAddr;
-use std::ops::Add;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use audiopus::coder::Encoder;
 use audiopus::{Application, Channels, SampleRate};
 use bytes::Bytes;
 use futures::stream::{SplitSink, SplitStream, StreamExt};
-use futures::task::{Context, Poll};
-use futures::{Sink, SinkExt};
-use log::{debug, info};
+use futures::SinkExt;
+use log::info;
 use mumble_protocol::control::{msgs, ClientControlCodec, ControlPacket};
 use mumble_protocol::crypt::ClientCryptState;
 use mumble_protocol::voice::{VoicePacket, VoicePacketPayload};
 use mumble_protocol::Serverbound;
 use sysinfo::SystemExt;
 use tokio::io;
+use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex, broadcast};
 use tokio::task::JoinHandle;
 use tokio::time;
-use tokio::time::{timeout_at, Duration, Instant};
+use tokio::time::Duration;
 use tokio_rustls::client::TlsStream;
 use tokio_util::codec::{Decoder, Framed};
 use tokio_util::udp::UdpFramed;
 
 use crate::mumble::connect::{HandshakeState, ResultAction};
-use crate::{CRATE_NAME, CRATE_VERSION};
+use crate::mumble::server_state::{ServerState, UserRef, ChannelRef};
 use crate::util::slice_to_u8_mut;
+use crate::{CRATE_NAME, CRATE_VERSION};
 
 mod connect;
 mod delegate_impl;
 mod logic;
+mod server_state;
 mod session;
 
 #[derive(Debug, Clone)]
@@ -51,10 +47,13 @@ type AudioSink =
 type AudioSource = SplitStream<UdpFramed<ClientCryptState>>;
 
 pub struct MumbleClient {
-    running: Arc<AtomicBool>,
+    stop_notify: watch::Sender<()>,
     tasks: Vec<JoinHandle<()>>,
-    sink: Arc<Mutex<PacketSink>>,
     audio_state: Arc<Mutex<AudioState>>,
+    event_chan: broadcast::Sender<Event>,
+    tcp_sink: Arc<Mutex<PacketSink>>,
+    server_state: Arc<Mutex<ServerState>>,
+    session_id: u32,
 }
 
 pub struct AudioState {
@@ -74,7 +73,7 @@ impl MumbleClient {
             .expect("failed to open UDP socket");
         let peer_addr = stream.get_ref().0.peer_addr().unwrap();
 
-        let running = Arc::new(AtomicBool::new(true));
+        let (stop_notify, stop_rx) = watch::channel(());
 
         let (mut sink, mut source) = ClientControlCodec::new().framed(stream).split();
 
@@ -100,23 +99,25 @@ impl MumbleClient {
         let sink = Arc::new(Mutex::new(sink));
 
         let mut handshake_state = HandshakeState::default();
+        let (tx, _) = broadcast::channel(20);
+        let server_state = Arc::new(Mutex::new(ServerState::new(tx.clone())));
 
-        let cs: Option<ClientCryptState> = loop {
+        let result: Option<(ClientCryptState, u32)> = loop {
             match source.next().await {
                 None => break None,
                 Some(packet) => {
                     let packet = packet.unwrap();
 
-                    match connect::handle_packet(handshake_state, packet).await {
+                    match connect::handle_packet(handshake_state, &server_state, packet).await {
                         ResultAction::Continue(state) => handshake_state = state,
                         ResultAction::Disconnect => break None,
-                        ResultAction::TransferConnected(a) => break Some(a),
+                        ResultAction::TransferConnected(a, s) => break Some((a, s)),
                     }
                 }
             }
         };
 
-        let cs = match cs {
+        let (cs, session_id) = match result {
             None => {
                 return Err(());
             }
@@ -135,20 +136,59 @@ impl MumbleClient {
             seq: 0,
         }));
 
-        let tcp_keepalive = tokio::spawn(session::tcp_keepalive(running.clone(), sink.clone()));
-        let tcp_handler = tokio::spawn(session::tcp_handler(running.clone(), source));
-        let udp_keepalive =
-            tokio::spawn(session::udp_keepalive(running.clone(), audio_state.clone()));
-        let udp_handler = tokio::spawn(session::udp_handler(running.clone(), audio_source));
 
-        let tasks = vec![tcp_keepalive, tcp_handler, udp_keepalive, udp_handler];
+        let tcp_handler = tokio::spawn(session::tcp_handler(
+            stop_rx.clone(),
+            source,
+            sink.clone(),
+            server_state.clone(),
+            tx.clone(),
+        ));
+        let udp_handler = tokio::spawn(session::udp_handler(
+            stop_rx.clone(),
+            audio_source,
+            audio_state.clone(),
+        ));
+
+        let tasks = vec![tcp_handler, udp_handler];
 
         Ok(MumbleClient {
-            running,
+            stop_notify,
             tasks,
-            sink,
             audio_state,
+            event_chan: tx,
+            tcp_sink: sink,
+            server_state,
+            session_id,
         })
+    }
+
+    pub fn event_listener(&self) -> broadcast::Receiver<Event> {
+        self.event_chan.subscribe()
+    }
+
+    pub async fn send_channel_message(&self, text: &str) {
+        let channel = self.channel().await;
+        let mut lock = self.tcp_sink.lock().await;
+        let mut m = msgs::TextMessage::new();
+        m.mut_channel_id().push(channel.id());
+        m.set_message(text.to_string());
+        lock.send(m.into()).await.unwrap();
+    }
+
+    pub fn user(&self) -> UserRef {
+        UserRef::new(self.session_id)
+    }
+
+    pub async fn channel(&self) -> ChannelRef {
+        let lock = self.server_state.lock().await;
+
+        let user = lock.user(self.session_id).unwrap();
+        user.channel()
+    }
+
+    pub fn server_state(&self) -> Arc<Mutex<ServerState>> {
+        self.server_state.clone()
     }
 
     pub async fn consume<T>(&self, mut pipe: T) -> io::Result<()>
@@ -249,7 +289,7 @@ impl MumbleClient {
     }
 
     pub async fn close(mut self) {
-        self.running.store(false, Ordering::Relaxed);
+        let _ = self.stop_notify.send(());
 
         for fut in self.tasks.drain(..) {
             fut.await.unwrap();
@@ -259,10 +299,7 @@ impl MumbleClient {
 
 impl Drop for MumbleClient {
     fn drop(&mut self) {
-        if self.running.load(Ordering::Relaxed) {
-            debug!("Mumble client was dropped without closing it first!");
-            self.running.store(false, Ordering::Relaxed);
-        }
+        let _ = self.stop_notify.send(());
     }
 }
 
@@ -271,59 +308,17 @@ pub struct WithAddress<T> {
     sink: T,
 }
 
-// pub struct AudioPipe {
-//     state: Arc<Mutex<AudioState>>,
-//     encoder: Encoder,
-//     ms_buf_size: usize,
-//     last_packet: Option<Instant>,
-//     pcm_buf: Vec<i16>,
-//     opus_buf_size: usize,
-// }
-//
-// impl AudioPipe {
-//     fn new(
-//         client: &MumbleClient,
-//         ms_buf_size: usize,
-//         sample_rate: SampleRate,
-//         bandwidth: usize,
-//     ) -> Self {
-//         let samples = sample_rate as usize * ms_buf_size / 1000;
-//         let opus_buf_size = bandwidth / 8 * ms_buf_size / 1000;
-//
-//         let mut pcm_buf = vec![0; samples];
-//
-//         let encoder =
-//             audiopus::coder::Encoder::new(sample_rate, Channels::Mono, Application::Audio).unwrap();
-//
-//         AudioPipe {
-//             state: client.audio_state.clone(),
-//             encoder,
-//             ms_buf_size,
-//             last_packet: None,
-//             pcm_buf,
-//             opus_buf_size,
-//         }
-//     }
-// }
-//
-// impl AsyncWrite for AudioPipe {
-//     fn poll_write(
-//         self: Pin<&mut Self>,
-//         cx: &mut Context<'_>,
-//         buf: &[u8],
-//     ) -> Poll<Result<usize, Error>> {
-//         if let Some(lp) = self.last_packet {
-//             if Instant::now().duration_since(lp).as_secs() > 2 {}
-//         }
-//
-//         unimplemented!()
-//     }
-//
-//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-//         unimplemented!()
-//     }
-//
-//     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-//         self.poll_flush(cx)
-//     }
-// }
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Event {
+    Message {
+        actor: Option<UserRef>,
+        receivers: Vec<UserRef>,
+        channels: Vec<ChannelRef>,
+        message: String,
+    },
+    UserMoved {
+        user: UserRef,
+        old_channel: ChannelRef,
+        new_channel: ChannelRef,
+    }
+}

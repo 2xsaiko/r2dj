@@ -19,8 +19,6 @@ where
         output.write_all(&buf[..len]).await?;
     }
 
-    output.shutdown().await?;
-
     Ok(())
 }
 

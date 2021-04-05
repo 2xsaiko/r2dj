@@ -7,10 +7,13 @@ use mumble_protocol::crypt::ClientCryptState;
 use mumble_protocol::Clientbound;
 use thiserror::Error;
 use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::webpki::DNSNameRef;
 use tokio_rustls::TlsConnector;
+
+use crate::mumble::server_state::ServerState;
 
 pub async fn connect(domain: &str, ip: u16) -> Result<TlsStream<TcpStream>, ConnectError> {
     let mut config = ClientConfig::new();
@@ -32,11 +35,12 @@ pub struct HandshakeState {
 pub enum ResultAction {
     Continue(HandshakeState),
     Disconnect,
-    TransferConnected(ClientCryptState),
+    TransferConnected(ClientCryptState, u32),
 }
 
 pub async fn handle_packet(
     mut state: HandshakeState,
+    server_state: &Arc<Mutex<ServerState>>,
     packet: ControlPacket<Clientbound>,
 ) -> ResultAction {
     match packet {
@@ -67,9 +71,12 @@ pub async fn handle_packet(
                 let permissions = msg.get_permissions();
 
                 info!("Server says: {}", welcome_text);
-                info!("session id {}, max bandwidth {}, permissions {:X}", session, max_bandwidth, permissions);
+                info!(
+                    "session id {}, max bandwidth {}, permissions {:X}",
+                    session, max_bandwidth, permissions
+                );
 
-                ResultAction::TransferConnected(crypt_state)
+                ResultAction::TransferConnected(crypt_state, session)
             }
             _ => {
                 error!("Server didn't give us crypt setup information during handshake!");
@@ -88,6 +95,26 @@ pub async fn handle_packet(
                 ResultAction::Disconnect
             }
         },
+        ControlPacket::UserState(p) => {
+            let mut st = server_state.lock().await;
+            st.update_user(*p);
+            ResultAction::Continue(state)
+        }
+        ControlPacket::UserRemove(p) => {
+            let mut st = server_state.lock().await;
+            st.remove_user(p.get_session());
+            ResultAction::Continue(state)
+        }
+        ControlPacket::ChannelState(p) => {
+            let mut st = server_state.lock().await;
+            st.update_channel(*p);
+            ResultAction::Continue(state)
+        }
+        ControlPacket::ChannelRemove(p) => {
+            let mut st = server_state.lock().await;
+            st.remove_channel(p.get_channel_id());
+            ResultAction::Continue(state)
+        }
         x => {
             debug!("Unhandled packet: {:?}", x);
 

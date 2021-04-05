@@ -2016,6 +2016,7 @@ name = "r2dj"
 version = "0.1.0"
 dependencies = [
  "audiopus",
+ "bit-set",
  "byteorder",
  "bytes 1.0.1",
  "cmdparser",

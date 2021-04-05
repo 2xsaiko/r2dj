@@ -89,22 +89,27 @@ impl AsyncWrite for MixerInput {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         let mut shared = self.shared.lock().unwrap();
-        let shared_input = shared.buffers.get_mut(&self.id).unwrap();
+        let shared_input = shared.buffers.get_mut(&self.id);
 
-        if shared_input.closed {
-            Poll::Ready(Err(io::Error::new(ErrorKind::BrokenPipe, "Broken pipe")))
-        } else if shared_input.buffer.len() < BUFFER_SIZE {
-            let to_write = min(buf.len(), BUFFER_SIZE - shared_input.buffer.len());
-            shared_input.buffer.extend_from_slice(&buf[..to_write]);
-
-            if let Some(w) = shared.read_notify.take() {
-                w.wake();
+        match shared_input {
+            None | Some(SharedInput { closed: true, .. }) => {
+                Poll::Ready(Ok(0))
             }
+            Some(shared_input) => {
+                if shared_input.buffer.len() < BUFFER_SIZE {
+                    let to_write = min(buf.len(), BUFFER_SIZE - shared_input.buffer.len());
+                    shared_input.buffer.extend_from_slice(&buf[..to_write]);
 
-            Poll::Ready(Ok(to_write))
-        } else {
-            shared_input.write_notify = Some(cx.waker().clone());
-            Poll::Pending
+                    if let Some(w) = shared.read_notify.take() {
+                        w.wake();
+                    }
+
+                    Poll::Ready(Ok(to_write))
+                } else {
+                    shared_input.write_notify = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }
         }
     }
 
@@ -114,9 +119,10 @@ impl AsyncWrite for MixerInput {
 
     fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let mut shared = self.shared.lock().unwrap();
-        let shared_input = shared.buffers.get_mut(&self.id).unwrap();
 
-        shared_input.closed = true;
+        if let Some(shared_input) = shared.buffers.get_mut(&self.id) {
+            shared_input.closed = true;
+        }
 
         Poll::Ready(Ok(()))
     }
@@ -128,6 +134,12 @@ impl Drop for MixerInput {
         let shared_input = shared.buffers.get_mut(&self.id).unwrap();
 
         shared_input.closed = true;
+    }
+}
+
+impl MixerOutput {
+    pub fn create_input(&self) -> MixerInput {
+        create_input(self.shared.clone())
     }
 }
 
@@ -159,7 +171,7 @@ impl AsyncRead for MixerOutput {
         } else {
             let now = Instant::now();
 
-            let time_diff = now.duration_since(shared.last_read);
+            let time_diff = min(now.duration_since(shared.last_read), Duration::from_secs(2));
             let max_samples = (FREQUENCY * CHANNELS * time_diff.as_millis() as u32 / 1000) as usize;
 
             if max_samples == 0 {
