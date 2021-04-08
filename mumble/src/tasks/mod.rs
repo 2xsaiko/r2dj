@@ -303,36 +303,6 @@ async fn udp_sender<T>(
     debug!("udp sender exit");
 }
 
-async fn handle_tcp(is: &InternalState, msg: Option<io::Result<ControlPacket<Clientbound>>>) {
-    match msg {
-        None => {
-            todo!("handle disconnection")
-        }
-        Some(Ok(p)) => match p {
-            ControlPacket::UDPTunnel(p) => handle_voice_packet(is, *p).await,
-            x @ _ => handle_control_packet(is, x).await,
-        },
-        Some(Err(e)) => {
-            error!("failed to receive TCP packet: {}", e)
-        }
-    }
-}
-
-async fn handle_udp(
-    is: &InternalState,
-    msg: Option<io::Result<(VoicePacket<Clientbound>, SocketAddr)>>,
-) {
-    match msg {
-        None => {
-            todo!("handle disconnection")
-        }
-        Some(Ok((p, _))) => handle_voice_packet(is, p).await,
-        Some(Err(e)) => {
-            error!("failed to receive UDP packet: {}", e)
-        }
-    }
-}
-
 async fn handle_control_packet(is: &InternalState, msg: ControlPacket<Clientbound>) {
     match msg {
         ControlPacket::Ping(p) => handle_ping(is, *p).await,
@@ -347,14 +317,14 @@ async fn handle_control_packet(is: &InternalState, msg: ControlPacket<Clientboun
     }
 }
 
-async fn handle_voice_packet(is: &InternalState, msg: VoicePacket<Clientbound>) {
+async fn handle_voice_packet(_is: &InternalState, msg: VoicePacket<Clientbound>) {
     match msg {
         VoicePacket::Ping { .. } => {}
         VoicePacket::Audio { .. } => {}
     }
 }
 
-async fn handle_ping(is: &InternalState, msg: msgs::Ping) {
+async fn handle_ping(_is: &InternalState, _msg: msgs::Ping) {
     // TODO
 }
 
