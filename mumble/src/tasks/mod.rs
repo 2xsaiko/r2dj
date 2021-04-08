@@ -16,9 +16,9 @@ use tokio::time::interval;
 
 use encoder::encoder;
 
-use crate::mixer::{new_mixer, MixerInput, MixerOutput};
-use crate::mumble::event::Event;
-use crate::mumble::server_state::{ChannelRef, ServerState, UserRef};
+use audiopipe::mixer::{new_mixer, MixerInput, MixerOutput};
+use crate::event::Event;
+use crate::server_state::{ChannelRef, ServerState, UserRef};
 
 mod encoder;
 

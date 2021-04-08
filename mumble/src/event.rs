@@ -1,4 +1,4 @@
-use crate::mumble::server_state::{UserRef, ChannelRef};
+use crate::server_state::{ChannelRef, UserRef};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Event {
@@ -12,5 +12,5 @@ pub enum Event {
         user: UserRef,
         old_channel: ChannelRef,
         new_channel: ChannelRef,
-    }
+    },
 }

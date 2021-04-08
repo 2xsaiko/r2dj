@@ -6,9 +6,7 @@ use log::error;
 use thiserror::Error;
 use tokio::io::AsyncWrite;
 use tokio::select;
-use tokio::sync::broadcast;
-use tokio::sync::oneshot;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::ffmpeg::{ffpipe, FfmpegConfig, Format, PathSource, PipeDest};

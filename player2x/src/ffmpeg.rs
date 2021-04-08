@@ -9,7 +9,7 @@ use futures::FutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::{ChildStdin, ChildStdout, Command};
 
-use crate::util::connect;
+use crate::connect;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FfmpegConfig {

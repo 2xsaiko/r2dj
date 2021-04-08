@@ -12,17 +12,19 @@ use tokio::task::JoinHandle;
 use tokio_util::codec::Decoder;
 use tokio_util::udp::UdpFramed;
 
-use crate::mixer::MixerInput;
-use crate::mumble::connect::{HandshakeState, ResultAction};
-pub use crate::mumble::event::Event;
-use crate::mumble::server_state::{ChannelRef, ServerState, UserRef};
-use crate::{CRATE_NAME, CRATE_VERSION};
-use crate::mumble::tasks::{Connectors, ConnectionInfo};
+use audiopipe::mixer::MixerInput;
+
+use crate::connect::{HandshakeState, ResultAction};
+pub use crate::event::Event;
+use crate::server_state::{ChannelRef, ServerState, UserRef};
+use crate::tasks::{ConnectionInfo, Connectors};
 
 mod connect;
 mod event;
 mod server_state;
 mod tasks;
+
+const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone)]
 pub struct MumbleConfig {
@@ -151,7 +153,7 @@ impl Drop for MumbleClient {
 fn get_version_packet() -> msgs::Version {
     let mut msg = msgs::Version::new();
     msg.set_version(0x00010204);
-    msg.set_release(format!("{} {}", CRATE_NAME, CRATE_VERSION));
+    msg.set_release(format!("{} {}", "mumble-rs", CRATE_VERSION));
     let info = sysinfo::System::new();
     msg.set_os(info.get_name().unwrap_or_else(|| "unknown".to_string()));
     msg.set_os_version(format!(

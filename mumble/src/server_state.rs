@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use bit_set::BitSet;
 use mumble_protocol::control::msgs;
 use tokio::sync::broadcast;
-use crate::mumble::Event;
+
+use crate::Event;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ChannelRef {
@@ -129,7 +130,7 @@ impl ServerState {
         ServerState {
             channels: Default::default(),
             users: Default::default(),
-            event_subscriber
+            event_subscriber,
         }
     }
 

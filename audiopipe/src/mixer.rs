@@ -1,9 +1,9 @@
 use std::cmp::min;
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::ops::Add;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bytes::{Buf, BytesMut};
 use futures::task::{Context, Poll, Waker};
@@ -11,10 +11,9 @@ use futures::FutureExt;
 use log::debug;
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::time::{sleep_until, Sleep};
-use tokio::time::{Duration, Instant};
+use tokio::time::{sleep_until, Instant, Sleep};
 
-use crate::util::slice_to_u8;
+use crate::slice_to_u8;
 
 const FREQUENCY: u32 = 48000;
 const WORD_SIZE: u32 = 2; // we're dealing with 16-bit PCM
@@ -96,9 +95,7 @@ impl AsyncWrite for MixerInput {
         let shared_input = shared.buffers.get_mut(&self.id);
 
         match shared_input {
-            None | Some(SharedInput { closed: true, .. }) => {
-                Poll::Ready(Ok(0))
-            }
+            None | Some(SharedInput { closed: true, .. }) => Poll::Ready(Ok(0)),
             Some(shared_input) => {
                 if shared_input.buffer.len() < BUFFER_SIZE {
                     let to_write = min(buf.len(), BUFFER_SIZE - shared_input.buffer.len());

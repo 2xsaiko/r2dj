@@ -141,6 +141,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "audiopipe"
+version = "0.1.0"
+dependencies = [
+ "bytes 1.0.1",
+ "futures 0.3.13",
+ "log 0.4.14",
+ "tokio 1.4.0",
+]
+
+[[package]]
 name = "audiopus"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1566,6 +1576,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "mumble"
+version = "0.1.0"
+dependencies = [
+ "audiopipe",
+ "audiopus",
+ "bit-set",
+ "byteorder",
+ "bytes 1.0.1",
+ "futures 0.3.13",
+ "log 0.4.14",
+ "mumble-protocol",
+ "sysinfo",
+ "thiserror",
+ "tokio 1.4.0",
+ "tokio-rustls",
+ "tokio-util",
+ "webpki-roots",
+]
+
+[[package]]
 name = "mumble-protocol"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1897,6 +1927,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3831453b3449ceb48b6d9c7ad7c96d5ea673e9b470a1dc578c2ce6521230884c"
 
 [[package]]
+name = "player2x"
+version = "0.1.0"
+dependencies = [
+ "futures 0.3.13",
+ "log 0.4.14",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio 1.4.0",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1999,7 +2041,8 @@ dependencies = [
  "futures 0.3.13",
  "librespot",
  "log 0.4.14",
- "mumble-protocol",
+ "mumble",
+ "player2x",
  "rand 0.8.3",
  "serde",
  "serde_json",

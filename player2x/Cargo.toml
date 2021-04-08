@@ -1,0 +1,16 @@
+[package]
+name = "player2x"
+description = "A media player library that just runs ffmpeg"
+version = "0.1.0"
+authors = ["Marco Rebhan <me@dblsaiko.net>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.2.0", features = ["sync", "rt", "macros", "process", "io-util"] }
+thiserror = "1.0.24"
+futures = "0.3.13"
+log = "0.4.14"
+serde = { version = "1.0.125", features = ["derive"] }
+serde_json = "1.0.64"

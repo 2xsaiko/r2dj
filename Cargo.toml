@@ -2,4 +2,4 @@
 lto = true
 
 [workspace]
-members = ["bot", "migtool"]
+members = ["audiopipe", "bot", "migtool", "mumble", "player2x"]

@@ -9,8 +9,7 @@ use tokio::select;
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio::time;
 
-use crate::mixer::MixerOutput;
-use crate::util::slice_to_u8_mut;
+use audiopipe::mixer::MixerOutput;
 use std::sync::Arc;
 
 pub(super) async fn encoder(
@@ -102,4 +101,8 @@ pub(super) async fn encoder(
     }
 
     debug!("encoder exit");
+}
+
+fn slice_to_u8_mut(slice: &mut [i16]) -> &mut [u8] {
+    unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut u8, slice.len() * 2) }
 }

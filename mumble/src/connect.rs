@@ -13,7 +13,7 @@ use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::webpki::DNSNameRef;
 use tokio_rustls::TlsConnector;
 
-use crate::mumble::server_state::ServerState;
+use crate::server_state::ServerState;
 
 pub async fn connect(domain: &str, ip: u16) -> Result<TlsStream<TcpStream>, ConnectError> {
     let mut config = ClientConfig::new();

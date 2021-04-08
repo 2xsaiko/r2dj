@@ -6,22 +6,15 @@ use std::time::Duration;
 use log::{info, LevelFilter};
 use simplelog::{Config, TerminalMode};
 
-use crate::ffplayer::Player;
-use crate::mumble::{Event, MumbleConfig};
+use mumble::{Event, MumbleConfig};
+use player2x::ffplayer::Player;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-mod buffer;
 mod config;
-mod ffmpeg;
-mod ffplayer;
-mod ffprobe;
-mod mixer;
-mod mumble;
 mod player;
 mod spotify;
-mod util;
 
 #[tokio::main]
 async fn main() {
