@@ -7,22 +7,21 @@ use mumble_protocol::control::{msgs, ClientControlCodec};
 use mumble_protocol::crypt::ClientCryptState;
 use sysinfo::SystemExt;
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio_util::codec::Decoder;
 use tokio_util::udp::UdpFramed;
 
-use crate::mixer::{new_mixer, MixerInput};
+use crate::mixer::MixerInput;
 use crate::mumble::connect::{HandshakeState, ResultAction};
 pub use crate::mumble::event::Event;
 use crate::mumble::server_state::{ChannelRef, ServerState, UserRef};
-use crate::mumble::state::ClientData;
 use crate::{CRATE_NAME, CRATE_VERSION};
+use crate::mumble::tasks::{Connectors, ConnectionInfo};
 
 mod connect;
 mod event;
 mod server_state;
-mod state;
 mod tasks;
 
 #[derive(Debug, Clone)]
@@ -33,38 +32,40 @@ pub struct MumbleConfig {
 pub struct MumbleClient {
     stop_notify: watch::Sender<()>,
     tasks: Vec<JoinHandle<()>>,
-    client_data: ClientData,
+    connectors: Connectors,
+    session: UserRef,
+    server_state: Arc<Mutex<ServerState>>,
 }
 
 impl MumbleClient {
     pub async fn connect(host: &str, port: u16, config: MumbleConfig) -> Result<Self, ()> {
+        let (stop_notify, stop_rx) = watch::channel(());
+        let connectors = Connectors::new(stop_rx);
+
+        // actually connect
+
         info!("Connecting to {}, port {}", host, port);
         let stream = connect::connect(host, port)
             .await
             .expect("failed to connect to server");
 
-        let udp_socket = UdpSocket::bind(stream.get_ref().0.local_addr().unwrap())
-            .await
-            .expect("failed to open UDP socket");
         let peer_addr = stream.get_ref().0.peer_addr().unwrap();
 
-        let (stop_notify, stop_rx) = watch::channel(());
+        let mut tcp = ClientControlCodec::new().framed(stream);
 
-        let (mut sink, mut source) = ClientControlCodec::new().framed(stream).split();
-
-        sink.send(get_version_packet().into()).await.unwrap();
+        tcp.send(get_version_packet().into()).await.unwrap();
 
         let mut msg = msgs::Authenticate::new();
         msg.set_username(config.username);
         msg.set_opus(true);
-        sink.send(msg.into()).await.unwrap();
+        tcp.send(msg.into()).await.unwrap();
 
         let mut handshake_state = HandshakeState::default();
         let (tx, _) = broadcast::channel(20);
         let server_state = Arc::new(Mutex::new(ServerState::new(tx.clone())));
 
         let result: Option<(ClientCryptState, u32)> = loop {
-            match source.next().await {
+            match tcp.next().await {
                 None => break None,
                 Some(packet) => {
                     let packet = packet.unwrap();
@@ -83,47 +84,26 @@ impl MumbleClient {
             Some(cs) => cs,
         };
 
-        let (audio_sink, audio_source) = UdpFramed::new(udp_socket, cs).split();
+        let udp_socket = UdpSocket::bind(tcp.get_ref().get_ref().0.local_addr().unwrap())
+            .await
+            .expect("failed to open UDP socket");
+        let udp = UdpFramed::new(udp_socket, cs);
 
-        let (voice_tx, voice_rx) = mpsc::channel(20);
-        let (event_chan, _) = broadcast::channel(20);
-        let (tcp_tx, tcp_rx) = mpsc::channel(20);
-        let (udp_tx, udp_rx) = mpsc::channel(20);
+        let connection_info = ConnectionInfo::new(tcp, udp, peer_addr, server_state.clone());
 
-        let (m_in, m_out) = new_mixer();
-
-        let client_data = ClientData {
-            server_state,
-            session: UserRef::new(session_id),
-            event_chan,
-            mixer: m_in,
-            voice_tx,
-            tcp_tx,
-            udp_tx,
-        };
-
-        let tasks = vec![
-            tokio::spawn(tasks::main_task(
-                client_data.clone(),
-                source,
-                audio_source,
-                voice_rx,
-                stop_rx,
-            )),
-            tokio::spawn(tasks::tcp_sender(tcp_rx, sink)),
-            tokio::spawn(tasks::udp_sender(udp_rx, audio_sink, peer_addr)),
-            tokio::spawn(tasks::encoder(client_data.clone(), m_out)),
-        ];
+        let tasks = tasks::start_tasks(connection_info, connectors.clone()).await;
 
         Ok(MumbleClient {
             stop_notify,
             tasks,
-            client_data,
+            connectors,
+            session: UserRef::new(session_id),
+            server_state,
         })
     }
 
-    pub fn event_listener(&self) -> broadcast::Receiver<Event> {
-        self.client_data.event_chan.subscribe()
+    pub fn event_subscriber(&self) -> broadcast::Receiver<Event> {
+        self.connectors.event_subscriber()
     }
 
     pub async fn send_channel_message(&self, text: &str) {
@@ -131,26 +111,26 @@ impl MumbleClient {
         let mut m = msgs::TextMessage::new();
         m.mut_channel_id().push(channel.id());
         m.set_message(text.to_string());
-        self.client_data.tcp_tx.send(m.into()).await.unwrap();
+        self.connectors.cp_tx().send(m.into()).await.unwrap();
     }
 
     pub fn user(&self) -> UserRef {
-        self.client_data.session
+        self.session
     }
 
     pub async fn channel(&self) -> ChannelRef {
-        let lock = self.client_data.server_state.lock().await;
+        let lock = self.server_state.lock().await;
 
-        let user = self.client_data.session.get(&lock).unwrap();
+        let user = self.session.get(&lock).unwrap();
         user.channel()
     }
 
     pub fn server_state(&self) -> Arc<Mutex<ServerState>> {
-        self.client_data.server_state.clone()
+        self.server_state.clone()
     }
 
     pub fn audio_input(&self) -> MixerInput {
-        self.client_data.mixer.clone()
+        self.connectors.audio_input()
     }
 
     pub async fn close(mut self) {

@@ -46,7 +46,7 @@ async fn main() {
         .unwrap();
     let st = client.server_state();
 
-    let mut r = client.event_listener();
+    let mut r = client.event_subscriber();
 
     let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
     player.play().await;
@@ -61,6 +61,10 @@ async fn main() {
                     Some(r) => r.get(&st).unwrap().name().to_string().into(),
                 };
 
+                if message == "stop!" {
+                    break;
+                }
+
                 println!("{}: {}", name, message);
 
                 drop(st);
@@ -74,6 +78,8 @@ async fn main() {
             _ => {}
         }
     }
+
+    client.send_channel_message("quitting!").await;
 
     client.close().await;
 }

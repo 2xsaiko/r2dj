@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
@@ -9,83 +10,307 @@ use mumble_protocol::control::{msgs, ControlPacket};
 use mumble_protocol::voice::{VoicePacket, VoicePacketPayload};
 use mumble_protocol::{Clientbound, Serverbound};
 use tokio::select;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-pub use encoder::encoder;
+use encoder::encoder;
 
+use crate::mixer::{new_mixer, MixerInput, MixerOutput};
 use crate::mumble::event::Event;
-use crate::mumble::server_state::{ChannelRef, UserRef};
-use crate::mumble::state::ClientData;
+use crate::mumble::server_state::{ChannelRef, ServerState, UserRef};
 
 mod encoder;
 
-pub async fn main_task<T, U>(
-    data: ClientData,
-    mut tcp_rx: T,
-    mut udp_rx: U,
-    mut voice_rx: mpsc::Receiver<VoicePacketPayload>,
-    mut stop_recv: watch::Receiver<()>,
-) where
-    T: Stream<Item = io::Result<ControlPacket<Clientbound>>> + Unpin,
-    U: Stream<Item = io::Result<(VoicePacket<Clientbound>, SocketAddr)>> + Unpin,
-{
-    let mut ping_timer = interval(Duration::from_secs(2));
-    let mut seq = 0;
+pub struct ConnectionInfo<T, U> {
+    tcp: T,
+    udp: U,
+    addr: SocketAddr,
+    server_state: Arc<Mutex<ServerState>>,
+}
 
-    loop {
-        select! {
-            msg = tcp_rx.next() => handle_tcp(&data, msg).await,
-            msg = udp_rx.next() => handle_udp(&data, msg).await,
-            frame = voice_rx.recv() => handle_voice_frame(&data, &mut seq, frame).await,
-            _ = ping_timer.tick() => ping(&data).await,
-            _ = stop_recv.changed() => break,
+impl<T, U> ConnectionInfo<T, U> {
+    pub fn new(tcp: T, udp: U, addr: SocketAddr, server_state: Arc<Mutex<ServerState>>) -> Self {
+        ConnectionInfo {
+            tcp,
+            udp,
+            addr,
+            server_state,
         }
     }
 }
 
-pub async fn tcp_sender<T>(mut source: mpsc::Receiver<ControlPacket<Serverbound>>, mut socket: T)
-where
-    T: Sink<ControlPacket<Serverbound>> + Unpin,
-    T::Error: Debug,
-{
-    while let Some(packet) = source.recv().await {
-        socket.send(packet).await.unwrap();
+#[derive(Debug, Clone)]
+pub struct Connectors {
+    m_in: MixerInput,
+    cp_tx: mpsc::Sender<ControlPacket<Serverbound>>,
+    event_chan: broadcast::Sender<Event>,
+    stop_recv: watch::Receiver<()>,
+
+    // Private stuff
+    cp_rx: Arc<Mutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
+    m_out: Arc<Mutex<MixerOutput>>,
+}
+
+impl Connectors {
+    pub fn new(stop_recv: watch::Receiver<()>) -> Self {
+        let (m_in, m_out) = new_mixer();
+        let (cp_tx, cp_rx) = mpsc::channel(20);
+        let (event_chan, _) = broadcast::channel(20);
+
+        Connectors {
+            m_in,
+            cp_tx,
+            event_chan,
+            stop_recv,
+            cp_rx: Arc::new(Mutex::new(cp_rx)),
+            m_out: Arc::new(Mutex::new(m_out)),
+        }
+    }
+
+    pub fn event_subscriber(&self) -> broadcast::Receiver<Event> {
+        self.event_chan.subscribe()
+    }
+
+    pub fn audio_input(&self) -> MixerInput {
+        self.m_in.clone()
+    }
+
+    pub fn cp_tx(&self) -> &mpsc::Sender<ControlPacket<Serverbound>> {
+        &self.cp_tx
     }
 }
 
-pub async fn udp_sender<T>(mut source: mpsc::Receiver<VoicePacket<Serverbound>>, mut socket: T, addr: SocketAddr)
+#[derive(Debug, Clone)]
+struct InternalConnectors {
+    voice_tx: mpsc::Sender<VoicePacketPayload>,
+    cp_tx: mpsc::Sender<ControlPacket<Serverbound>>,
+    vp_tx: mpsc::Sender<VoicePacket<Serverbound>>,
+    event_chan: broadcast::Sender<Event>,
+}
+
+#[derive(Debug, Clone)]
+struct InternalState {
+    server_state: Arc<Mutex<ServerState>>,
+    ic: InternalConnectors,
+}
+
+pub async fn start_tasks<T, U>(ci: ConnectionInfo<T, U>, stuff: Connectors) -> Vec<JoinHandle<()>>
 where
+    T: Stream<Item = io::Result<ControlPacket<Clientbound>>>
+        + Sink<ControlPacket<Serverbound>>
+        + Send
+        + Unpin
+        + 'static,
+    T::Error: Debug,
+    U: Stream<Item = io::Result<(VoicePacket<Clientbound>, SocketAddr)>>
+        + Sink<(VoicePacket<Serverbound>, SocketAddr)>
+        + Send
+        + Unpin
+        + 'static,
+    U::Error: Debug,
+{
+    // no partial borrows :(
+    let Connectors {
+        cp_tx,
+        event_chan,
+        stop_recv,
+        cp_rx,
+        m_out,
+        ..
+    } = stuff;
+    let ConnectionInfo {
+        tcp,
+        udp,
+        addr,
+        server_state,
+    } = ci;
+
+    let (tcp_tx, tcp_rx) = tcp.split();
+    let (udp_tx, udp_rx) = udp.split();
+
+    let (vp_tx, vp_rx) = mpsc::channel(20);
+    let (voice_tx, voice_rx) = mpsc::channel(20);
+
+    let is = InternalState {
+        ic: InternalConnectors {
+            voice_tx,
+            cp_tx,
+            vp_tx,
+            event_chan,
+        },
+        server_state: server_state.clone(),
+    };
+
+    vec![
+        tokio::spawn(pinger(
+            is.ic.cp_tx.clone(),
+            is.ic.vp_tx.clone(),
+            stop_recv.clone(),
+        )),
+        tokio::spawn(encoder(is.ic.voice_tx.clone(), m_out, stop_recv.clone())),
+        tokio::spawn(voice(is.ic.vp_tx.clone(), voice_rx)),
+        tokio::spawn(receive_tcp(is.clone(), tcp_rx, stop_recv.clone())),
+        tokio::spawn(receive_udp(is.clone(), udp_rx, stop_recv.clone())),
+        tokio::spawn(tcp_sender(cp_rx, tcp_tx, stop_recv.clone())),
+        tokio::spawn(udp_sender(vp_rx, udp_tx, addr)),
+    ]
+}
+
+async fn receive_tcp<T>(is: InternalState, mut stream: T, mut stop_recv: watch::Receiver<()>)
+where
+    T: Stream<Item = io::Result<ControlPacket<Clientbound>>> + Unpin,
+{
+    let op = async move {
+        while let Some(r) = stream.next().await {
+            match r {
+                Ok(msg) => match msg {
+                    ControlPacket::UDPTunnel(p) => handle_voice_packet(&is, *p).await,
+                    x @ _ => handle_control_packet(&is, x).await,
+                },
+                Err(e) => {
+                    error!("error receiving TCP packet: {}", e);
+                }
+            }
+        }
+    };
+
+    select! {
+        _ = op => {}
+        _ = stop_recv.changed() => {}
+    }
+
+    debug!("receive_tcp exit");
+}
+
+async fn receive_udp<T>(is: InternalState, mut stream: T, mut stop_recv: watch::Receiver<()>)
+where
+    T: Stream<Item = io::Result<(VoicePacket<Clientbound>, SocketAddr)>> + Unpin,
+{
+    let op = async move {
+        while let Some(r) = stream.next().await {
+            match r {
+                Ok((msg, _)) => {
+                    handle_voice_packet(&is, msg).await;
+                }
+                Err(e) => {
+                    error!("error receiving UDP packet: {}", e);
+                }
+            }
+        }
+    };
+
+    select! {
+        _ = op => {}
+        _ = stop_recv.changed() => {}
+    }
+
+    debug!("receive_udp exit");
+}
+
+async fn voice(
+    vp_tx: mpsc::Sender<VoicePacket<Serverbound>>,
+    mut voice_rx: mpsc::Receiver<VoicePacketPayload>,
+) {
+    let mut seq = 0;
+
+    while let Some(frame) = voice_rx.recv().await {
+        let packet = VoicePacket::Audio {
+            _dst: Default::default(),
+            target: 0,
+            session_id: (),
+            seq_num: seq,
+            payload: frame,
+            position_info: None,
+        };
+
+        vp_tx.send(packet).await.unwrap();
+
+        seq += 1;
+    }
+
+    debug!("voice exit");
+}
+
+async fn pinger(
+    cp_tx: mpsc::Sender<ControlPacket<Serverbound>>,
+    vp_tx: mpsc::Sender<VoicePacket<Serverbound>>,
+    mut stop_recv: watch::Receiver<()>,
+) {
+    let mut ping_timer = interval(Duration::from_secs(2));
+
+    let op = async move {
+        loop {
+            ping_timer.tick().await;
+
+            let utime = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            let mut msg = msgs::Ping::new();
+            msg.set_timestamp(utime);
+            cp_tx.send(msg.into()).await.unwrap();
+
+            let msg = VoicePacket::Ping { timestamp: utime };
+            vp_tx.send(msg).await.unwrap();
+        }
+    };
+
+    select! {
+        _ = stop_recv.changed() => {},
+        _ = op => {},
+    }
+
+    debug!("pinger exit");
+}
+
+async fn tcp_sender<T>(
+    source: Arc<Mutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
+    mut socket: T,
+    mut stop_recv: watch::Receiver<()>,
+) where
+    T: Sink<ControlPacket<Serverbound>> + Unpin,
+    T::Error: Debug,
+{
+    let mut source = source.lock().await;
+
+    let op = async move {
+        while let Some(packet) = source.recv().await {
+            socket.send(packet).await.unwrap();
+        }
+    };
+
+    select! {
+        _ = stop_recv.changed() => {},
+        _ = op => {},
+    }
+
+    debug!("tcp sender exit");
+}
+
+async fn udp_sender<T>(
+    mut source: mpsc::Receiver<VoicePacket<Serverbound>>,
+    mut socket: T,
+    addr: SocketAddr,
+) where
     T: Sink<(VoicePacket<Serverbound>, SocketAddr)> + Unpin,
     T::Error: Debug,
 {
     while let Some(packet) = source.recv().await {
         socket.send((packet, addr)).await.unwrap();
     }
+    debug!("udp sender exit");
 }
 
-async fn ping(data: &ClientData) {
-    let utime = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let mut msg = msgs::Ping::new();
-    msg.set_timestamp(utime);
-    data.tcp_tx.send(msg.into()).await.unwrap();
-
-    let msg = VoicePacket::Ping { timestamp: utime };
-    data.udp_tx.send(msg).await.unwrap();
-}
-
-async fn handle_tcp(data: &ClientData, msg: Option<io::Result<ControlPacket<Clientbound>>>) {
+async fn handle_tcp(is: &InternalState, msg: Option<io::Result<ControlPacket<Clientbound>>>) {
     match msg {
         None => {
             todo!("handle disconnection")
         }
         Some(Ok(p)) => match p {
-            ControlPacket::UDPTunnel(p) => handle_voice_packet(data, *p).await,
-            x @ _ => handle_control_packet(data, x).await,
+            ControlPacket::UDPTunnel(p) => handle_voice_packet(is, *p).await,
+            x @ _ => handle_control_packet(is, x).await,
         },
         Some(Err(e)) => {
             error!("failed to receive TCP packet: {}", e)
@@ -94,85 +319,65 @@ async fn handle_tcp(data: &ClientData, msg: Option<io::Result<ControlPacket<Clie
 }
 
 async fn handle_udp(
-    data: &ClientData,
+    is: &InternalState,
     msg: Option<io::Result<(VoicePacket<Clientbound>, SocketAddr)>>,
 ) {
     match msg {
         None => {
             todo!("handle disconnection")
         }
-        Some(Ok((p, _))) => handle_voice_packet(data, p).await,
+        Some(Ok((p, _))) => handle_voice_packet(is, p).await,
         Some(Err(e)) => {
             error!("failed to receive UDP packet: {}", e)
         }
     }
 }
 
-async fn handle_voice_frame(data: &ClientData, seq: &mut u64, frame: Option<VoicePacketPayload>) {
-    let frame = frame.unwrap();
-
-    let packet = VoicePacket::Audio {
-        _dst: Default::default(),
-        target: 0,
-        session_id: (),
-        seq_num: *seq,
-        payload: frame,
-        position_info: None,
-    };
-
-    data.udp_tx.send(packet).await.unwrap();
-
-    *seq += 1;
-}
-
-async fn handle_control_packet(data: &ClientData, msg: ControlPacket<Clientbound>) {
+async fn handle_control_packet(is: &InternalState, msg: ControlPacket<Clientbound>) {
     match msg {
-        ControlPacket::Ping(p) => handle_ping(data, *p).await,
-        ControlPacket::UserState(p) => handle_user_state(data, *p).await,
-        ControlPacket::UserRemove(p) => handle_user_remove(data, *p).await,
-        ControlPacket::ChannelState(p) => handle_channel_state(data, *p).await,
-        ControlPacket::ChannelRemove(p) => handle_channel_remove(data, *p).await,
-        ControlPacket::TextMessage(p) => handle_text_message(data, *p).await,
+        ControlPacket::Ping(p) => handle_ping(is, *p).await,
+        ControlPacket::UserState(p) => handle_user_state(is, *p).await,
+        ControlPacket::UserRemove(p) => handle_user_remove(is, *p).await,
+        ControlPacket::ChannelState(p) => handle_channel_state(is, *p).await,
+        ControlPacket::ChannelRemove(p) => handle_channel_remove(is, *p).await,
+        ControlPacket::TextMessage(p) => handle_text_message(is, *p).await,
         _ => {
             debug!("Unhandled packet: {:?}", msg);
         }
     }
 }
 
-async fn handle_voice_packet(data: &ClientData, msg: VoicePacket<Clientbound>) {
+async fn handle_voice_packet(is: &InternalState, msg: VoicePacket<Clientbound>) {
     match msg {
         VoicePacket::Ping { .. } => {}
         VoicePacket::Audio { .. } => {}
     }
 }
 
-async fn handle_ping(data: &ClientData, msg: msgs::Ping) {
+async fn handle_ping(is: &InternalState, msg: msgs::Ping) {
     // TODO
 }
 
-async fn handle_user_state(data: &ClientData, msg: msgs::UserState) {
-    data.server_state.lock().await.update_user(msg);
+async fn handle_user_state(is: &InternalState, msg: msgs::UserState) {
+    is.server_state.lock().await.update_user(msg);
 }
 
-async fn handle_user_remove(data: &ClientData, msg: msgs::UserRemove) {
-    data.server_state
-        .lock()
-        .await
-        .remove_user(msg.get_session());
+async fn handle_user_remove(is: &InternalState, msg: msgs::UserRemove) {
+    is.server_state.lock().await.remove_user(msg.get_session());
 }
 
-async fn handle_channel_state(data: &ClientData, msg: msgs::ChannelState) {
-    data.server_state.lock().await.update_channel(msg);
+async fn handle_channel_state(is: &InternalState, msg: msgs::ChannelState) {
+    is.server_state.lock().await.update_channel(msg);
 }
 
-async fn handle_channel_remove(data: &ClientData, msg: msgs::ChannelRemove) {
-    data.server_state
+async fn handle_channel_remove(is: &InternalState, msg: msgs::ChannelRemove) {
+    is.server_state
         .lock()
         .await
         .remove_channel(msg.get_channel_id());
 }
 
-async fn handle_text_message(data: &ClientData, mut msg: msgs::TextMessage) {
+async fn handle_text_message(is: &InternalState, mut msg: msgs::TextMessage) {
     let actor = if msg.has_actor() {
         Some(UserRef::new(msg.get_actor()))
     } else {
@@ -193,5 +398,5 @@ async fn handle_text_message(data: &ClientData, mut msg: msgs::TextMessage) {
         message,
     };
 
-    let _ = data.event_chan.send(event);
+    let _ = is.ic.event_chan.send(event);
 }
