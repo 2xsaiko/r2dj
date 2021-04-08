@@ -116,6 +116,15 @@ impl MumbleClient {
         self.connectors.cp_tx().send(m.into()).await.unwrap();
     }
 
+    pub async fn set_comment<S>(&self, text: S)
+    where
+        S: Into<String>,
+    {
+        let mut state = msgs::UserState::new();
+        state.set_comment(text.into());
+        self.connectors.cp_tx().send(state.into()).await.unwrap();
+    }
+
     pub fn user(&self) -> UserRef {
         self.session
     }
