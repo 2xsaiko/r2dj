@@ -15,6 +15,7 @@ const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 mod config;
 mod player;
 mod spotify;
+mod db;
 
 #[tokio::main]
 async fn main() {

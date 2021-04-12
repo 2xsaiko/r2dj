@@ -340,12 +340,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "build_const"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39092a32794787acd8525ee150305ff051b0aa6cc2abaf193924f5ab05425f39"
-
-[[package]]
 name = "bumpalo"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -551,15 +545,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8aebca1129a03dc6dc2b127edd729435bbc4a37e1d5f4d7513165089ceb02634"
 
 [[package]]
-name = "crc"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d663548de7f5cca343f1e0a48d14dcfb0e9eb4e079ec58883b7251539fa10aeb"
-dependencies = [
- "build_const",
-]
-
-[[package]]
 name = "crossbeam-channel"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -688,7 +673,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4434400df11d95d556bac068ddfedd482915eb18fe8bea89bc80b6e4b1c179e5"
 dependencies = [
  "generic-array 0.12.4",
- "subtle",
+ "subtle 1.0.0",
+]
+
+[[package]]
+name = "crypto-mac"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4857fd85a0c34b3c3297875b747c1e02e06b6a0ea32dd892d8192b9ce0813ea6"
+dependencies = [
+ "generic-array 0.14.4",
+ "subtle 2.4.0",
 ]
 
 [[package]]
@@ -1041,8 +1036,18 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dcb5e64cda4c23119ab41ba960d1e170a774c8e4b9d9e6a9bc18aabf5e59695"
 dependencies = [
- "crypto-mac",
+ "crypto-mac 0.7.0",
  "digest 0.8.1",
+]
+
+[[package]]
+name = "hmac"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1441c6b1e930e2817404b5046f1f989899143a12bf92de603b69f4e0aee1e15"
+dependencies = [
+ "crypto-mac 0.10.0",
+ "digest 0.9.0",
 ]
 
 [[package]]
@@ -1321,7 +1326,7 @@ dependencies = [
  "protobuf",
  "rand 0.7.3",
  "rpassword",
- "sha-1",
+ "sha-1 0.8.2",
  "tokio-core",
  "tokio-io",
  "tokio-process",
@@ -1358,7 +1363,7 @@ dependencies = [
  "base64 0.10.1",
  "block-modes",
  "futures 0.1.31",
- "hmac",
+ "hmac 0.7.1",
  "hyper",
  "libmdns",
  "librespot-core",
@@ -1371,7 +1376,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "sha-1",
+ "sha-1 0.8.2",
  "tokio-core",
  "url 1.7.2",
 ]
@@ -1388,7 +1393,7 @@ dependencies = [
  "bytes 0.4.12",
  "error-chain",
  "futures 0.1.31",
- "hmac",
+ "hmac 0.7.1",
  "httparse",
  "hyper",
  "hyper-proxy",
@@ -1404,7 +1409,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "sha-1",
+ "sha-1 0.8.2",
  "shannon",
  "tokio-codec",
  "tokio-core",
@@ -1542,6 +1547,17 @@ dependencies = [
  "block-buffer 0.7.3",
  "digest 0.8.1",
  "opaque-debug 0.2.3",
+]
+
+[[package]]
+name = "md-5"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5a279bb9607f9f53c22d496eade00d138d1bdcccd07d74650387cf94942a15"
+dependencies = [
+ "block-buffer 0.9.0",
+ "digest 0.9.0",
+ "opaque-debug 0.3.0",
 ]
 
 [[package]]
@@ -1971,11 +1987,11 @@ checksum = "006c038a43a45995a9670da19e67600114740e8511d4333bf97a56e66a7542d9"
 dependencies = [
  "base64 0.9.3",
  "byteorder",
- "crypto-mac",
- "hmac",
+ "crypto-mac 0.7.0",
+ "hmac 0.7.1",
  "rand 0.5.6",
  "sha2 0.8.2",
- "subtle",
+ "subtle 1.0.0",
 ]
 
 [[package]]
@@ -2136,6 +2152,7 @@ dependencies = [
 name = "r2dj"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "cmdparser",
  "futures 0.3.13",
  "librespot",
@@ -2148,7 +2165,9 @@ dependencies = [
  "thiserror",
  "tokio 1.4.0",
  "tokio-util",
+ "url 2.2.1",
  "uuid 0.8.2",
+ "youtube_dl",
 ]
 
 [[package]]
@@ -2688,6 +2707,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha-1"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfebf75d25bd900fd1e7d11501efab59bc846dbc76196839663e6637bba9f25f"
+dependencies = [
+ "block-buffer 0.9.0",
+ "cfg-if 1.0.0",
+ "cpuid-bool",
+ "digest 0.9.0",
+ "opaque-debug 0.3.0",
+]
+
+[[package]]
 name = "sha2"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2843,14 +2875,14 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hex 0.4.3",
- "hmac",
+ "hmac 0.7.1",
  "libc",
  "log 0.4.14",
- "md-5",
+ "md-5 0.8.0",
  "memchr",
  "percent-encoding 2.1.0",
  "rand 0.7.3",
- "sha-1",
+ "sha-1 0.8.2",
  "sha2 0.8.2",
  "sqlformat",
  "tokio 0.2.25",
@@ -2866,10 +2898,11 @@ checksum = "b1cad9cae4ca8947eba1a90e8ec7d3c59e7a768e2f120dc9013b669c34a90711"
 dependencies = [
  "ahash 0.6.3",
  "atoi",
+ "base64 0.13.0",
  "bitflags",
  "byteorder",
  "bytes 1.0.1",
- "crc",
+ "chrono",
  "crossbeam-channel",
  "crossbeam-queue 0.3.1",
  "crossbeam-utils 0.8.3",
@@ -2879,14 +2912,20 @@ dependencies = [
  "futures-util",
  "hashlink",
  "hex 0.4.3",
+ "hmac 0.10.1",
  "itoa",
  "libc",
  "log 0.4.14",
+ "md-5 0.9.1",
  "memchr",
  "once_cell",
  "parking_lot 0.11.1",
  "percent-encoding 2.1.0",
+ "rand 0.7.3",
  "rustls",
+ "serde",
+ "serde_json",
+ "sha-1 0.9.4",
  "sha2 0.9.3",
  "smallvec 1.6.1",
  "sqlformat",
@@ -2895,6 +2934,7 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "url 2.2.1",
+ "uuid 0.8.2",
  "webpki",
  "webpki-roots",
  "whoami",
@@ -2930,7 +2970,6 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "sha2 0.9.3",
  "sqlx-core 0.5.1",
  "sqlx-rt",
  "syn",
@@ -2990,6 +3029,12 @@ name = "subtle"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d67a5a62ba6e01cb2192ff309324cb4875d0c451d55fe2319433abe7a05a8ee"
+
+[[package]]
+name = "subtle"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e81da0851ada1f3e9d4312c704aa4f8806f0f9d69faaf8df2f3464b4a9437c2"
 
 [[package]]
 name = "syn"
@@ -3604,6 +3649,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 
 [[package]]
+name = "wait-timeout"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f200f5b12eb75f8c1ed65abd4b2db8a6e1b138a20de009dacee265a2498f3f6"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "want"
 version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3777,3 +3831,15 @@ name = "wyz"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85e60b0d1b5f99db2556934e21937020776a5d31520bf169e851ac44e6420214"
+
+[[package]]
+name = "youtube_dl"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f9da35dcf2f7b27831aff69d7dbcb226dbcbe56522a7cddf75ec1d5b54738bb"
+dependencies = [
+ "log 0.4.14",
+ "serde",
+ "serde_json",
+ "wait-timeout",
+]

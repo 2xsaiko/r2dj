@@ -51,29 +51,14 @@ CREATE TABLE album_track
 
 -- Track providers
 
-CREATE TABLE track_provider_local
-(
-    id    uuid NOT NULL,
-    track uuid NOT NULL,
-    path  text NOT NULL,
-    PRIMARY KEY (id),
-    FOREIGN KEY (track) REFERENCES track (id)
-);
+CREATE TYPE track_provider_type AS ENUM ('local', 'url', 'spotify', 'youtube');
 
-CREATE TABLE track_provider_url
+CREATE TABLE track_provider
 (
-    id    uuid NOT NULL,
-    track uuid NOT NULL,
-    url   text NOT NULL,
-    PRIMARY KEY (id),
-    FOREIGN KEY (track) REFERENCES track (id)
-);
-
-CREATE TABLE track_provider_spotify
-(
-    id         uuid NOT NULL,
-    track      uuid NOT NULL,
-    spotify_id text NOT NULL,
+    id     uuid                NOT NULL,
+    track  uuid                NOT NULL,
+    type   track_provider_type NOT NULL,
+    source TEXT                NOT NULL,
     PRIMARY KEY (id),
     FOREIGN KEY (track) REFERENCES track (id)
 );
@@ -84,12 +69,12 @@ CREATE TYPE external_source AS ENUM ('spotify', 'youtube');
 
 CREATE TABLE playlist
 (
-    id                   uuid NOT NULL,
-    title                text NOT NULL,
+    id                   uuid        NOT NULL,
+    title                text        NOT NULL,
     external_source_type external_source,
     external_source      text,
-    created              date NOT NULL,
-    modified             date,
+    created              timestamptz NOT NULL,
+    modified             timestamptz,
     PRIMARY KEY (id)
 );
 

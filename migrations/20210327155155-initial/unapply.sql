@@ -3,9 +3,7 @@
 
 DROP TABLE playlist_entry;
 DROP TABLE playlist;
-DROP TABLE track_provider_spotify;
-DROP TABLE track_provider_url;
-DROP TABLE track_provider_local;
+DROP TABLE track_provider;
 DROP TABLE album_track;
 DROP TABLE album;
 DROP TABLE genre;
@@ -15,3 +13,4 @@ DROP TABLE track;
 
 DROP FUNCTION playlist_entry_before_row();
 DROP TYPE external_source;
+DROP TYPE track_provider_type;
