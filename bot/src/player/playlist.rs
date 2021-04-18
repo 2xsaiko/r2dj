@@ -1,17 +1,22 @@
-use std::path::PathBuf;
-use std::time::Duration;
-use uuid::Uuid;
+use futures::future::BoxFuture;
+use futures::{FutureExt, TryStreamExt};
 use rand::Rng;
+use sqlx::PgPool;
+use uuid::Uuid;
+
 use crate::player::Track;
 
+#[derive(Debug, Clone)]
 pub struct Playlist {
     persistent_id: Option<Uuid>,
+    title: String,
     entries: Vec<PlaylistLike>,
     playlist_mode: PlaylistMode,
     shuffle: bool,
     last_played: Vec<usize>,
 }
 
+#[derive(Debug, Clone)]
 enum PlaylistLike {
     Track(Track),
     Playlist(Playlist),
@@ -45,11 +50,53 @@ impl Playlist {
     pub fn new() -> Self {
         Playlist {
             persistent_id: None,
+            title: "Playlist".to_string(),
             entries: vec![],
             playlist_mode: PlaylistMode::Flatten,
             shuffle: false,
             last_played: vec![],
         }
+    }
+
+    pub fn load(uuid: Uuid, db: &PgPool) -> BoxFuture<sqlx::Result<Self>> {
+        async move {
+            let row = sqlx::query!("SELECT title FROM playlist WHERE id = $1", uuid)
+                .fetch_one(db)
+                .await?;
+
+            let db_entries: Vec<_> = sqlx::query!(
+                "SELECT id, track, sub_playlist FROM playlist_entry \
+                 WHERE playlist = $1 \
+                 ORDER BY index",
+                uuid
+            )
+            .fetch(db)
+            .try_collect()
+            .await?;
+
+            let mut entries = Vec::new();
+
+            for el in db_entries {
+                let entry = match (el.track, el.sub_playlist) {
+                    (Some(track), None) => PlaylistLike::Track(Track::load(track, db).await?),
+                    (None, Some(sub_playlist)) => {
+                        PlaylistLike::Playlist(Playlist::load(sub_playlist, db).await?)
+                    }
+                    (_, _) => unreachable!(),
+                };
+                entries.push(entry);
+            }
+
+            Ok(Playlist {
+                persistent_id: Some(uuid),
+                title: row.title,
+                entries,
+                playlist_mode: PlaylistMode::Flatten,
+                shuffle: false,
+                last_played: vec![],
+            })
+        }
+        .boxed()
     }
 
     fn add(&mut self, entry: PlaylistLike) {
@@ -185,9 +232,7 @@ impl PlaylistLike {
 
 impl RootOrderTracker {
     pub fn new(size: usize) -> Self {
-        RootOrderTracker {
-            v: vec![1.0; size]
-        }
+        RootOrderTracker { v: vec![1.0; size] }
     }
 
     pub fn next(&mut self) -> usize {
@@ -259,7 +304,7 @@ fn add_last(vec: &mut Vec<usize>, idx: usize) {
 
 #[cfg(test)]
 mod test {
-    use super::{add_last, select_next, Playlist, PlaylistLike, Track, PlaylistMode};
+    use super::{add_last, select_next, Playlist, PlaylistLike, PlaylistMode, Track};
 
     #[test]
     fn test_random_dist() {

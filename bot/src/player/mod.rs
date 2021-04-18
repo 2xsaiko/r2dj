@@ -1,12 +1,13 @@
 use tokio::time::Duration;
 use uuid::Uuid;
 
-use crate::player::playlist::{PlayMode, Playlist};
 use crate::player::track::Track;
 
 mod playlist;
 mod track;
-mod import;
+pub mod import;
+
+pub use playlist::*;
 
 pub struct Room {
     id: Uuid,

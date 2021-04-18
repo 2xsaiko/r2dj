@@ -2158,6 +2158,7 @@ dependencies = [
  "librespot",
  "log 0.4.14",
  "mumble",
+ "num_cpus",
  "player2x",
  "rand 0.8.3",
  "simplelog",

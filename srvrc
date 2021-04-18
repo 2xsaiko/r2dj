@@ -1,1 +1,9 @@
+data_dir data/
+
+mumble dblsaiko.net 64738
+name r2dj
+
 db_url "postgres://r2dj:r2dj@localhost/r2dj"
+
+db_pool_size_scale 2
+db_pool_size_min 1

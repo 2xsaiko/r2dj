@@ -17,10 +17,6 @@ pub struct Track {
     id: Uuid,
     title: Option<String>,
     providers: Vec<TrackProvider>,
-
-    self_changed: bool,
-    title_changed: bool,
-    db: PgPool,
 }
 
 #[derive(Debug, Clone)]
@@ -38,14 +34,11 @@ pub enum TrackProviderData {
 }
 
 impl Track {
-    pub fn new(db: &PgPool) -> Self {
+    pub fn new() -> Self {
         Track {
             id: Uuid::new_v4(),
             title: None,
             providers: vec![],
-            self_changed: true,
-            title_changed: true,
-            db: db.clone(),
         }
     }
 
@@ -82,28 +75,7 @@ impl Track {
             id: track.id,
             title: track.title,
             providers,
-            self_changed: false,
-            title_changed: false,
-            db: db.clone(),
         })
-    }
-
-    pub async fn save(&mut self) -> sqlx::Result<()> {
-        if self.self_changed {
-            sqlx::query!(
-                "INSERT INTO track (id, title) VALUES ($1, $2)",
-                self.id,
-                self.title
-            )
-            .execute(&self.db).await?;
-        } else {
-            if self.title_changed {}
-        }
-
-        self.self_changed = false;
-        self.title_changed = false;
-
-        Ok(())
     }
 
     pub fn providers(&self) -> &[TrackProvider] {
