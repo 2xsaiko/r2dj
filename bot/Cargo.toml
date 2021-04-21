@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 mumble = { path = "../mumble" }
 player2x = { path = "../player2x" }
+audiopipe = { path = "../audiopipe" }
 
 tokio = { version = "1.2.0", features = ["full"] }
 thiserror = "1.0.24"

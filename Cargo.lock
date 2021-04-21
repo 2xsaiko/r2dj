@@ -2152,6 +2152,7 @@ dependencies = [
 name = "r2dj"
 version = "0.1.0"
 dependencies = [
+ "audiopipe",
  "chrono",
  "cmdparser",
  "futures 0.3.13",

@@ -96,7 +96,7 @@ impl<W> Player<W>
 where
     W: AsyncWrite + Send + Unpin + 'static,
 {
-    pub async fn play(&mut self) {
+    pub async fn play(&self) {
         let mut state = self.state.lock().await;
 
         if state.playing_state.is_some() {

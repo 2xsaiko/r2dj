@@ -2,25 +2,25 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 
 use log::{info, LevelFilter};
 use simplelog::{Config, TerminalMode};
-use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
+use uuid::Uuid;
 
 use mumble::{Event, MumbleConfig};
 use player2x::ffplayer::Player;
-use uuid::Uuid;
-use std::str::FromStr;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 mod config;
+mod db;
 mod player;
 mod spotify;
-mod db;
 
 #[tokio::main]
 async fn main() {
@@ -39,24 +39,25 @@ async fn main() {
         .max_connections(config.db_pool_size)
         .min_connections(config.db_pool_size_min)
         .idle_timeout(Some(Duration::from_secs(600)))
-        .connect(&config.db_url).await.unwrap();
+        .connect(&config.db_url)
+        .await
+        .unwrap();
 
     let id = Uuid::from_str("99b071f7-bdae-48b4-9c0a-aac91332c348").unwrap();
     let pl = player::Playlist::load(id, &pool).await.unwrap();
 
-    println!("{:#?}", pl);
+    let mumble_config = MumbleConfig {
+        username: config.name.clone(),
+    };
 
-    // let config = MumbleConfig {
-    //     username: config.name.clone(),
-    // };
-    //
-    // let client = mumble::MumbleClient::connect(host, port, config)
-    //     .await
-    //     .unwrap();
-    // let st = client.server_state();
-    //
-    // let mut r = client.event_subscriber();
-    //
+    let client =
+        mumble::MumbleClient::connect(&config.mumble_domain, config.mumble_port, mumble_config)
+            .await
+            .unwrap();
+    let st = client.server_state();
+
+    let mut r = client.event_subscriber();
+
     // let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
     // player.play().await;
     //
@@ -87,10 +88,10 @@ async fn main() {
     //         _ => {}
     //     }
     // }
-    //
-    // client.send_channel_message("quitting!").await;
-    //
-    // client.close().await;
+
+    client.send_channel_message("quitting!").await;
+
+    client.close().await;
 }
 
 struct FmtDuration(Duration);
@@ -120,8 +121,8 @@ pub struct LaunchConfig {
 
 fn load_config() -> LaunchConfig {
     use cmdparser::CommandDispatcher;
-    use cmdparser::SimpleExecutor;
     use cmdparser::ExecSource;
+    use cmdparser::SimpleExecutor;
 
     let mut data_dir = None;
     let mut db_url = None;
@@ -133,15 +134,50 @@ fn load_config() -> LaunchConfig {
     let mut cd = CommandDispatcher::new(SimpleExecutor::new(|cmd, args| match cmd {
         "data_dir" => data_dir = Some(args[0].to_string()),
         "db_url" => db_url = Some(args[0].to_string()),
-        "db_pool_size" => db_pool_size = Some(args[0].parse::<u32>().expect("db_pool_size must be a positive integer")),
-        "db_pool_size_scale" => db_pool_size = Some(args[0].parse::<u32>().expect("db_pool_size must be a positive integer") * num_cpus::get() as u32),
-        "db_pool_size_min" => db_pool_size_min = Some(args[0].parse::<u32>().expect("db_pool_size_min must be a positive integer")),
-        "db_pool_size_min_scale" => db_pool_size_min = Some(args[0].parse::<u32>().expect("db_pool_size_min must be a positive integer") * num_cpus::get() as u32),
-        "mumble" => mumble = Some((args[0].to_string(), args[1].parse::<u16>().expect("mumble second param must be port"))),
+        "db_pool_size" => {
+            db_pool_size = Some(
+                args[0]
+                    .parse::<u32>()
+                    .expect("db_pool_size must be a positive integer"),
+            )
+        }
+        "db_pool_size_scale" => {
+            db_pool_size = Some(
+                args[0]
+                    .parse::<u32>()
+                    .expect("db_pool_size must be a positive integer")
+                    * num_cpus::get() as u32,
+            )
+        }
+        "db_pool_size_min" => {
+            db_pool_size_min = Some(
+                args[0]
+                    .parse::<u32>()
+                    .expect("db_pool_size_min must be a positive integer"),
+            )
+        }
+        "db_pool_size_min_scale" => {
+            db_pool_size_min = Some(
+                args[0]
+                    .parse::<u32>()
+                    .expect("db_pool_size_min must be a positive integer")
+                    * num_cpus::get() as u32,
+            )
+        }
+        "mumble" => {
+            mumble = Some((
+                args[0].to_string(),
+                args[1]
+                    .parse::<u16>()
+                    .expect("mumble second param must be port"),
+            ))
+        }
         "name" => name = Some(args[0].to_string()),
         _ => eprintln!("Ignoring invalid bootstrap command '{}'!", cmd),
     }));
-    cd.scheduler().exec_path("srvrc", ExecSource::Event).expect("Failed to load srvrc");
+    cd.scheduler()
+        .exec_path("srvrc", ExecSource::Event)
+        .expect("Failed to load srvrc");
     cd.resume_until_empty();
 
     let db_pool_size = db_pool_size.unwrap_or_else(|| num_cpus::get() as u32);
