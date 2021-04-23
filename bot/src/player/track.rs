@@ -42,6 +42,10 @@ impl Track {
         }
     }
 
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
     pub async fn load(id: Uuid, db: &PgPool) -> sqlx::Result<Self> {
         let track = sqlx::query!("SELECT id, title FROM track WHERE id = $1", id)
             .fetch_one(db)
@@ -125,6 +129,7 @@ async fn youtube_dl<P>(url: &Url, output: P) -> Result<(), GetFileError>
 where
     P: AsRef<Path>,
 {
+    // FIXME this isn't converting the audio to flac...
     let mut cmd = Command::new("youtube-dl");
     cmd.arg("-x").arg("--audio-format").arg("flac");
     cmd.arg("-o").arg(output.as_ref()).arg(url.as_str());

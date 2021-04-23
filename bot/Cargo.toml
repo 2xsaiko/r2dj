@@ -26,6 +26,7 @@ url = "2.2.1"
 chrono = "0.4.19"
 youtube_dl = "0.6.1"
 num_cpus = "1.13.0"
+pin-project-lite = "0.2.6"
 
 [build-dependencies]
 cmdparser = { git = "https://git.2x.ax/~saiko/cmdparser", default-features = false }

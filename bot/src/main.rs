@@ -8,11 +8,11 @@ use std::time::Duration;
 use log::{info, LevelFilter};
 use simplelog::{Config, TerminalMode};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
 use uuid::Uuid;
 
-use mumble::{Event, MumbleConfig};
-use player2x::ffplayer::Player;
+use mumble::{Event as MumbleEvent, MumbleConfig};
+
+use crate::player::{Event as RoomEvent, Room};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -58,39 +58,76 @@ async fn main() {
 
     let mut r = client.event_subscriber();
 
+    let room = Room::new(client.audio_input());
+    let mut room_events = room.subscribe();
+    room.set_playlist(pl).await;
+
     // let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
     // player.play().await;
-    //
-    // while let Ok(ev) = r.recv().await {
-    //     match ev {
-    //         Event::Message { actor, message, .. } => {
-    //             let st = st.lock().await;
-    //
-    //             let name: Cow<_> = match actor {
-    //                 None => "<unknown>".into(),
-    //                 Some(r) => r.get(&st).unwrap().name().to_string().into(),
-    //             };
-    //
-    //             if message == "stop!" {
-    //                 break;
-    //             }
-    //
-    //             println!("{}: {}", name, message);
-    //
-    //             drop(st);
-    //
-    //             if actor != Some(client.user()) {
-    //                 client
-    //                     .send_channel_message(&format!("{}: {}", name, message))
-    //                     .await;
-    //             }
-    //         }
-    //         _ => {}
-    //     }
-    // }
+
+    loop {
+        tokio::select! {
+            ev = r.recv() => {
+                let ev = match ev {
+                    Ok(ev) => ev,
+                    Err(_) => break,
+                };
+
+                match ev {
+                    MumbleEvent::Message { actor, message, .. } => {
+                        let st = st.lock().await;
+
+                        let name: Cow<_> = match actor {
+                            None => "<unknown>".into(),
+                            Some(r) => r.get(&st).unwrap().name().to_string().into(),
+                        };
+
+                        match &*message {
+                            ";skip" => {
+                                room.next().await;
+                            }
+                            ";pause" => {
+                                room.pause().await;
+                            }
+                            ";play" => {
+                                room.play().await;
+                            }
+                            ";quit" => {
+                                break;
+                            }
+                            _ => {}
+                        }
+
+                        println!("{}: {}", name, message);
+
+                        drop(st);
+
+                        if actor != Some(client.user()) {
+                            client
+                                .send_channel_message(&format!("{}: {}", name, message))
+                                .await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            ev = room_events.recv() => {
+                let ev = match ev {
+                    Ok(ev) => ev,
+                    Err(_) => break,
+                };
+
+                match ev {
+                    RoomEvent::PlayerEvent(p) => {}
+                    RoomEvent::TrackChanged(t) => {
+                        client.set_comment(format!("Now Playing:<br>{}", t.title().unwrap_or("unknown track"))).await;
+                    }
+                }
+            }
+        }
+    }
 
     client.send_channel_message("quitting!").await;
-
     client.close().await;
 }
 
