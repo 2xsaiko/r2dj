@@ -117,7 +117,10 @@ where
             let pipe = pipe;
             let mut pipe = pipe.lock().await;
 
-            let _ = sender.send(PlayerEvent::Playing { now: Instant::now() });
+            let _ = sender.send(PlayerEvent::Playing {
+                now: Instant::now(),
+                pos: position,
+            });
 
             let r = select!(
                 result = ffpipe(
@@ -151,7 +154,7 @@ where
                     let _ = sender.send(PlayerEvent::Paused {
                         now,
                         pos: state.position,
-                        stopped: false
+                        stopped: false,
                     });
                 }
             }
@@ -193,6 +196,7 @@ pub enum Error {
 pub enum PlayerEvent {
     Playing {
         now: Instant,
+        pos: Duration,
     },
     Paused {
         now: Instant,

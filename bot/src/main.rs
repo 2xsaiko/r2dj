@@ -1,18 +1,20 @@
 use std::borrow::Cow;
+use std::cmp::min;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use log::{info, LevelFilter};
 use simplelog::{Config, TerminalMode};
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
-use mumble::{Event as MumbleEvent, MumbleConfig};
-
+use mumble::{Event as MumbleEvent, MumbleClient, MumbleConfig};
+use player2x::ffplayer::PlayerEvent;
 use crate::player::{Event as RoomEvent, Room};
+use tokio::time::interval;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -62,11 +64,18 @@ async fn main() {
     let mut room_events = room.subscribe();
     room.set_playlist(pl).await;
 
+    let mut prev_rst = RoomStatus::default();
+    let mut rst = RoomStatus::default();
+    let mut update_timer = interval(Duration::from_secs(5));
+
     // let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
     // player.play().await;
 
     loop {
         tokio::select! {
+            _ = update_timer.tick() => {
+                update_status(&client, &mut prev_rst, &rst).await;
+            }
             ev = r.recv() => {
                 let ev = match ev {
                     Ok(ev) => ev,
@@ -101,12 +110,6 @@ async fn main() {
                         println!("{}: {}", name, message);
 
                         drop(st);
-
-                        if actor != Some(client.user()) {
-                            client
-                                .send_channel_message(&format!("{}: {}", name, message))
-                                .await;
-                        }
                     }
                     _ => {}
                 }
@@ -118,9 +121,24 @@ async fn main() {
                 };
 
                 match ev {
-                    RoomEvent::PlayerEvent(p) => {}
-                    RoomEvent::TrackChanged(t) => {
-                        client.set_comment(format!("Now Playing:<br>{}", t.title().unwrap_or("unknown track"))).await;
+                    RoomEvent::PlayerEvent(p) => {
+                        match p {
+                            PlayerEvent::Playing { now, pos } => {
+                                rst.playing_since = Some(now);
+                                rst.position = pos;
+                                update_status(&client, &mut prev_rst, &rst).await;
+                            },
+                            PlayerEvent::Paused { pos, .. } => {
+                                rst.playing_since = None;
+                                rst.position = pos;
+                                update_status(&client, &mut prev_rst, &rst).await;
+                            },
+                        }
+                    }
+                    RoomEvent::TrackChanged(t, len) => {
+                        rst.title = t.title().unwrap_or("Unnamed Track").to_string();
+                        rst.total_duration = len;
+                        update_status(&client, &mut prev_rst, &rst).await;
                     }
                 }
             }
@@ -129,6 +147,71 @@ async fn main() {
 
     client.send_channel_message("quitting!").await;
     client.close().await;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RoomStatus {
+    title: String,
+    album_title: String,
+    artist: String,
+    position: Duration,
+    playing_since: Option<Instant>,
+    total_duration: Duration,
+}
+
+impl RoomStatus {
+    pub fn should_update(&self, other: &RoomStatus) -> bool {
+        self.playing_since.is_some() || self != other
+    }
+}
+
+impl Default for RoomStatus {
+    fn default() -> Self {
+        RoomStatus {
+            title: "(none)".to_string(),
+            album_title: "(none)".to_string(),
+            artist: "(none)".to_string(),
+            position: Default::default(),
+            playing_since: None,
+            total_duration: Default::default()
+        }
+    }
+}
+
+async fn update_status(client: &MumbleClient, prev_st: &mut RoomStatus, st: &RoomStatus) {
+    if !st.should_update(&prev_st) {
+        *prev_st = st.clone();
+        return;
+    }
+
+    let state_ch = match st.playing_since {
+        None => "⏸︎",
+        Some(_) => "⏵︎",
+    };
+
+    let current_position = match st.playing_since {
+        None => st.position,
+        Some(then) => {
+            let diff = Instant::now().duration_since(then);
+            min(st.position + diff, st.total_duration)
+        }
+    };
+
+    let str = format!(
+        "{}<br>{}<br>{}<br>[{}] [{} / {}]<hr>{} {}",
+        st.title,
+        st.album_title,
+        st.artist,
+        state_ch,
+        FmtDuration(current_position),
+        FmtDuration(st.total_duration),
+        CRATE_NAME,
+        CRATE_VERSION,
+    );
+
+    client.set_comment(str).await;
+
+    *prev_st = st.clone();
 }
 
 struct FmtDuration(Duration);

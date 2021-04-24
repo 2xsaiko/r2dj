@@ -121,9 +121,11 @@ impl RoomData {
             player.play().await;
         }
 
+        let length = player.length();
+
         self.player = Some(player);
 
-        let _ = self.event_tx.send(Event::TrackChanged(tr));
+        let _ = self.event_tx.send(Event::TrackChanged(tr, length));
     }
 }
 
@@ -207,7 +209,7 @@ enum Message {
 #[derive(Debug, Clone)]
 pub enum Event {
     PlayerEvent(PlayerEvent),
-    TrackChanged(Track),
+    TrackChanged(Track, Duration),
 }
 
 pin_project! {
