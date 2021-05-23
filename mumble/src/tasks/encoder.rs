@@ -37,8 +37,12 @@ pub(super) async fn encoder<S>(
     let mut interval = time::interval(Duration::from_millis(ms_buf_size as u64));
 
     let op = async move {
+        let mut last_was_empty = true;
+
         loop {
             interval.tick().await;
+
+            let mut is_empty = true;
 
             for (idx, frame) in pipe.by_ref().take(pcm_buf.len()).enumerate() {
                 // adjust volume
@@ -46,17 +50,27 @@ pub(super) async fn encoder<S>(
 
                 // TODO: handle more than left channel
                 let ch0 = frame.channel(0).unwrap();
-                pcm_buf[idx] = ch0.to_sample().scale_amp(0.1);
+                let sample = ch0.to_sample().scale_amp(0.1);
+
+                if sample != 0 {
+                    is_empty = false;
+                }
+
+                pcm_buf[idx] = sample;
             }
 
-            let len = encoder.encode(&pcm_buf, &mut opus_buf).unwrap();
+            if !(is_empty && last_was_empty) {
+                let len = encoder.encode(&pcm_buf, &mut opus_buf).unwrap();
 
-            let _ = voice_tx
-                .send(VoicePacketPayload::Opus(
-                    Bytes::copy_from_slice(&opus_buf[..len]),
-                    false,
-                ))
-                .await;
+                let _ = voice_tx
+                    .send(VoicePacketPayload::Opus(
+                        Bytes::copy_from_slice(&opus_buf[..len]),
+                        is_empty,
+                    ))
+                    .await;
+            }
+
+            last_was_empty = is_empty;
         }
     };
 
