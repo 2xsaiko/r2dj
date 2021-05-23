@@ -1,15 +1,31 @@
+use std::ffi::OsStr;
+use std::fmt::Debug;
+use std::io;
+use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::process::Stdio;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use dasp::{Frame, Sample};
+use futures::future::BoxFuture;
+use futures::{FutureExt, Sink, SinkExt};
 use log::error;
+use pin_project_lite::pin_project;
 use thiserror::Error;
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio::process::{ChildStdout, Command};
 use tokio::select;
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::ffmpeg::{ffpipe, FfmpegConfig, Format, PathSource, PipeDest};
+use audiopipe::aaaaaaa::AudioSource;
+use audiopipe::mixerv2::AudioFormat;
+use audiopipe::streamio::{StreamWrite, StreamWriteExt};
+
+use crate::ffmpeg::{ffpipe, FfmpegConfig, Format, PathSource, PipeDest, TranscoderOutput};
 use crate::ffprobe;
 
 // TODO replace with Duration::ZERO
@@ -39,8 +55,8 @@ struct PlayingTracker {
     tx: oneshot::Sender<()>,
 }
 
-impl<W> Player<W> {
-    pub fn new<P: Into<PathBuf>>(path: P, pipe: W) -> Result<Self> {
+impl Player<AudioSource<2>> {
+    pub fn new<P: Into<PathBuf>>(path: P, pipe: AudioSource<2>) -> Result<Self> {
         let path = path.into();
         let info = ffprobe::ffprobe(&path)?;
 
@@ -71,6 +87,8 @@ impl<W> Player<W> {
 
         tracker.tx.send(()).unwrap();
         tracker.task.await.unwrap();
+
+        self.pipe.lock().await.set_running(false);
     }
 
     pub async fn is_playing(&self) -> bool {
@@ -92,10 +110,7 @@ impl<W> Player<W> {
     }
 }
 
-impl<W> Player<W>
-where
-    W: AsyncWrite + Send + Unpin + 'static,
-{
+impl Player<AudioSource<2>> {
     pub async fn play(&self) {
         let mut state = self.state.lock().await;
 
@@ -116,6 +131,7 @@ where
         let task = tokio::spawn(async move {
             let pipe = pipe;
             let mut pipe = pipe.lock().await;
+            pipe.set_running(true);
 
             let _ = sender.send(PlayerEvent::Playing {
                 now: Instant::now(),
@@ -125,9 +141,10 @@ where
             let r = select!(
                 result = ffpipe(
                     PathSource::new(path),
-                    PipeDest::new(&mut *pipe),
+                    Recoder::new(&mut *pipe),
                     FfmpegConfig::default()
                         .start_at(position)
+                        .channels(2)
                         .output_format(Format::native_pcm(48000)),
                 ) => match result {
                     Ok(_) => Ok(true),
@@ -203,4 +220,64 @@ pub enum PlayerEvent {
         pos: Duration,
         stopped: bool,
     },
+}
+
+struct Recoder<T> {
+    buffer: [u8; 4],
+    buf_len: u8,
+    inner: T,
+}
+
+impl<T> Recoder<T> {
+    pub fn new(inner: T) -> Self {
+        Recoder {
+            buffer: [0; 4],
+            buf_len: 0,
+            inner,
+        }
+    }
+}
+
+impl<'a, T> TranscoderOutput<'a> for Recoder<T>
+where
+    T: Sink<[f32; 2]> + Unpin + Send + 'a,
+    T::Error: Debug,
+{
+    fn to_arg(&self) -> &OsStr {
+        OsStr::new("-")
+    }
+
+    fn pre_spawn(&self, command: &mut Command) {
+        command.stdout(Stdio::piped());
+    }
+
+    fn handle_stdout(mut self, mut stdout: ChildStdout) -> BoxFuture<'a, io::Result<()>> {
+        async move {
+            loop {
+                let mut bytes = [0; 4];
+
+                match stdout.read_exact(&mut bytes).await {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == ErrorKind::UnexpectedEof => break Ok(()),
+                    Err(e) => break Err(e),
+                }
+
+                let data = [
+                    i16::from_ne_bytes([bytes[0], bytes[1]]),
+                    i16::from_ne_bytes([bytes[2], bytes[3]]),
+                ];
+
+                match self.inner.send(Frame::map(data, Sample::to_sample)).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        break Err(io::Error::new(
+                            ErrorKind::Other,
+                            format!("sink error: {:?}", e),
+                        ))
+                    }
+                }
+            }
+        }
+        .boxed()
+    }
 }

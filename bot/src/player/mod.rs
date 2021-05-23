@@ -8,11 +8,13 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::time::Duration;
 use uuid::Uuid;
 
-use audiopipe::mixer::MixerInput;
 use player2x::ffplayer::{Player, PlayerEvent};
 pub use playlist::*;
 
 use crate::player::track::Track;
+use audiopipe::aaaaaaa::{AudioSource, Core};
+use petgraph::graph::NodeIndex;
+use std::sync::Arc;
 
 pub mod import;
 mod playlist;
@@ -22,9 +24,10 @@ struct RoomData {
     mode: PlayMode,
     playlist: Playlist,
     track_state: Option<TrackState>,
-    player: Option<Player<MixerInput>>,
+    player: Option<Player<AudioSource<2>>>,
     player_receiver: Option<broadcast::Receiver<PlayerEvent>>,
-    audio_out: MixerInput,
+    audio_out: NodeIndex,
+    ac: Arc<Core>,
     event_tx: broadcast::Sender<Event>,
 }
 
@@ -45,7 +48,7 @@ struct TrackState {
 }
 
 impl Room {
-    pub fn new(audio_out: MixerInput) -> Self {
+    pub fn new(audio_out: NodeIndex, ac: Arc<Core>) -> Self {
         let (event_tx, _) = broadcast::channel(20);
 
         let rd = RoomData {
@@ -55,6 +58,7 @@ impl Room {
             player: None,
             player_receiver: None,
             audio_out,
+            ac,
             event_tx: event_tx.clone(),
         };
 
@@ -114,7 +118,8 @@ impl RoomData {
 
         let tr = self.get_next();
         let path = tr.providers().first().unwrap().media_path().await.unwrap();
-        let player = Player::new(path, self.audio_out.clone()).unwrap();
+        let out = self.ac.add_input_to(Some(self.audio_out));
+        let player = Player::new(path, out).unwrap();
         self.player_receiver = Some(player.event_listener());
 
         if playing {

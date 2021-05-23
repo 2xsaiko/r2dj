@@ -19,6 +19,8 @@ use encoder::encoder;
 use audiopipe::mixer::{new_mixer, MixerInput, MixerOutput};
 use crate::event::Event;
 use crate::server_state::{ChannelRef, ServerState, UserRef};
+use audiopipe::aaaaaaa::{OutputSignal, Core};
+use petgraph::graph::NodeIndex;
 
 mod encoder;
 
@@ -42,29 +44,29 @@ impl<T, U> ConnectionInfo<T, U> {
 
 #[derive(Debug, Clone)]
 pub struct Connectors {
-    m_in: MixerInput,
+    m_in: NodeIndex,
     cp_tx: mpsc::Sender<ControlPacket<Serverbound>>,
     event_chan: broadcast::Sender<Event>,
     stop_recv: watch::Receiver<()>,
 
     // Private stuff
     cp_rx: Arc<Mutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
-    m_out: Arc<Mutex<MixerOutput>>,
+    m_out: Arc<Mutex<OutputSignal<2>>>,
 }
 
 impl Connectors {
-    pub fn new(stop_recv: watch::Receiver<()>) -> Self {
-        let (m_in, m_out) = new_mixer();
+    pub fn new(stop_recv: watch::Receiver<()>, ac: &Core) -> Self {
+        let output = ac.add_output();
         let (cp_tx, cp_rx) = mpsc::channel(20);
         let (event_chan, _) = broadcast::channel(20);
 
         Connectors {
-            m_in,
+            m_in: output.node(),
             cp_tx,
             event_chan,
             stop_recv,
             cp_rx: Arc::new(Mutex::new(cp_rx)),
-            m_out: Arc::new(Mutex::new(m_out)),
+            m_out: Arc::new(Mutex::new(output)),
         }
     }
 
@@ -72,7 +74,7 @@ impl Connectors {
         self.event_chan.subscribe()
     }
 
-    pub fn audio_input(&self) -> MixerInput {
+    pub fn audio_input(&self) -> NodeIndex {
         self.m_in.clone()
     }
 

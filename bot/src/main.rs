@@ -8,13 +8,17 @@ use std::time::{Duration, Instant};
 
 use log::{info, LevelFilter};
 use simplelog::{Config, TerminalMode};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::ConnectOptions;
+use tokio::time::interval;
 use uuid::Uuid;
 
 use mumble::{Event as MumbleEvent, MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
+
 use crate::player::{Event as RoomEvent, Room};
-use tokio::time::interval;
+use audiopipe::aaaaaaa::Core;
+use std::sync::Arc;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -37,11 +41,19 @@ async fn main() {
 
     info!("Starting {} {}", CRATE_NAME, CRATE_VERSION);
 
+    let mut co = config
+        .db_url
+        .parse::<PgConnectOptions>()
+        .unwrap()
+        .application_name(CRATE_NAME);
+
+    co.log_statements(LevelFilter::Trace);
+
     let pool = PgPoolOptions::new()
         .max_connections(config.db_pool_size)
         .min_connections(config.db_pool_size_min)
         .idle_timeout(Some(Duration::from_secs(600)))
-        .connect(&config.db_url)
+        .connect_with(co)
         .await
         .unwrap();
 
@@ -52,15 +64,17 @@ async fn main() {
         username: config.name.clone(),
     };
 
+    let ac = Arc::new(Core::new(48000));
+
     let client =
-        mumble::MumbleClient::connect(&config.mumble_domain, config.mumble_port, mumble_config)
+        mumble::MumbleClient::connect(&config.mumble_domain, config.mumble_port, mumble_config, &ac)
             .await
             .unwrap();
     let st = client.server_state();
 
     let mut r = client.event_subscriber();
 
-    let room = Room::new(client.audio_input());
+    let room = Room::new(client.audio_input(), ac);
     let mut room_events = room.subscribe();
     room.set_playlist(pl).await;
 
@@ -173,7 +187,7 @@ impl Default for RoomStatus {
             artist: "(none)".to_string(),
             position: Default::default(),
             playing_since: None,
-            total_duration: Default::default()
+            total_duration: Default::default(),
         }
     }
 }

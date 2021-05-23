@@ -18,6 +18,8 @@ use crate::connect::{HandshakeState, ResultAction};
 pub use crate::event::Event;
 use crate::server_state::{ChannelRef, ServerState, UserRef};
 use crate::tasks::{ConnectionInfo, Connectors};
+use audiopipe::aaaaaaa::Core;
+use petgraph::graph::NodeIndex;
 
 mod connect;
 mod event;
@@ -40,9 +42,9 @@ pub struct MumbleClient {
 }
 
 impl MumbleClient {
-    pub async fn connect(host: &str, port: u16, config: MumbleConfig) -> Result<Self, ()> {
+    pub async fn connect(host: &str, port: u16, config: MumbleConfig, ac: &Core) -> Result<Self, ()> {
         let (stop_notify, stop_rx) = watch::channel(());
-        let connectors = Connectors::new(stop_rx);
+        let connectors = Connectors::new(stop_rx, ac);
 
         // actually connect
 
@@ -140,7 +142,7 @@ impl MumbleClient {
         self.server_state.clone()
     }
 
-    pub fn audio_input(&self) -> MixerInput {
+    pub fn audio_input(&self) -> NodeIndex {
         self.connectors.audio_input()
     }
 
