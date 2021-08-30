@@ -1,26 +1,26 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use futures::stream::StreamExt;
 use futures::SinkExt;
 use log::info;
 use mumble_protocol::control::{msgs, ClientControlCodec};
 use mumble_protocol::crypt::ClientCryptState;
+use petgraph::graph::NodeIndex;
 use sysinfo::SystemExt;
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, watch};
-use std::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::codec::Decoder;
 use tokio_util::udp::UdpFramed;
 
+use audiopipe::aaaaaaa::Core;
 use audiopipe::mixer::MixerInput;
 
 use crate::connect::{HandshakeState, ResultAction};
 pub use crate::event::Event;
-use crate::server_state::{ChannelRef, ServerState, UserRef, User};
+use crate::server_state::{ChannelRef, ServerState, User, UserRef};
 use crate::tasks::{ConnectionInfo, Connectors};
-use audiopipe::aaaaaaa::Core;
-use petgraph::graph::NodeIndex;
 
 mod connect;
 mod event;
@@ -43,7 +43,12 @@ pub struct MumbleClient {
 }
 
 impl MumbleClient {
-    pub async fn connect(host: &str, port: u16, config: MumbleConfig, ac: &Core) -> Result<Self, ()> {
+    pub async fn connect(
+        host: &str,
+        port: u16,
+        config: MumbleConfig,
+        ac: &Core,
+    ) -> Result<Self, ()> {
         let (stop_notify, stop_rx) = watch::channel(());
         let connectors = Connectors::new(stop_rx, ac);
 
@@ -111,10 +116,28 @@ impl MumbleClient {
         self.connectors.event_subscriber()
     }
 
-    pub async fn send_channel_message(&self, text: &str) {
-        let channel = self.channel();
+    pub async fn message_my_channel(&self, text: &str) {
+        self.message_channel(self.channel(), text).await;
+    }
+
+    pub async fn message_channel(&self, channel: ChannelRef, text: &str) {
+        self.broadcast_message([channel], [], text).await;
+    }
+
+    pub async fn message_user(&self, user: UserRef, text: &str) {
+        self.broadcast_message([], [user], text).await;
+    }
+
+    pub async fn broadcast_message<C, S>(&self, channels: C, users: S, text: &str)
+    where
+        C: IntoIterator<Item = ChannelRef>,
+        S: IntoIterator<Item = UserRef>,
+    {
         let mut m = msgs::TextMessage::new();
-        m.mut_channel_id().push(channel.id());
+        m.mut_channel_id()
+            .extend(channels.into_iter().map(|el| el.id()));
+        m.mut_session()
+            .extend(users.into_iter().map(|el| el.session_id()));
         m.set_message(text.to_string());
         self.connectors.cp_tx().send(m.into()).await.unwrap();
     }
@@ -133,7 +156,11 @@ impl MumbleClient {
     }
 
     pub fn get_user(&self, r: UserRef) -> Option<User> {
-        self.server_state.lock().unwrap().user(r.session_id()).cloned()
+        self.server_state
+            .lock()
+            .unwrap()
+            .user(r.session_id())
+            .cloned()
     }
 
     pub fn channel(&self) -> ChannelRef {

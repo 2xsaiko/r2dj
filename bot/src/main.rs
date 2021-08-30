@@ -131,7 +131,8 @@ async fn main() {
                                     println!("{:?}", entry);
                                 }
 
-                                client.send_channel_message(&message).await;
+                                client.message_my_channel(&message).await;
+                                client.message_user(actor.unwrap(), "hi").await;
                             }
                             ";quit" => {
                                 break;
@@ -175,7 +176,7 @@ async fn main() {
         }
     }
 
-    client.send_channel_message("quitting!").await;
+    client.message_my_channel("quitting!").await;
     client.close().await;
 }
 
