@@ -7,7 +7,8 @@ use mumble_protocol::control::{msgs, ClientControlCodec};
 use mumble_protocol::crypt::ClientCryptState;
 use sysinfo::SystemExt;
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, watch, Mutex};
+use tokio::sync::{broadcast, watch};
+use std::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::codec::Decoder;
 use tokio_util::udp::UdpFramed;
@@ -16,7 +17,7 @@ use audiopipe::mixer::MixerInput;
 
 use crate::connect::{HandshakeState, ResultAction};
 pub use crate::event::Event;
-use crate::server_state::{ChannelRef, ServerState, UserRef};
+use crate::server_state::{ChannelRef, ServerState, UserRef, User};
 use crate::tasks::{ConnectionInfo, Connectors};
 use audiopipe::aaaaaaa::Core;
 use petgraph::graph::NodeIndex;
@@ -111,7 +112,7 @@ impl MumbleClient {
     }
 
     pub async fn send_channel_message(&self, text: &str) {
-        let channel = self.channel().await;
+        let channel = self.channel();
         let mut m = msgs::TextMessage::new();
         m.mut_channel_id().push(channel.id());
         m.set_message(text.to_string());
@@ -131,15 +132,15 @@ impl MumbleClient {
         self.session
     }
 
-    pub async fn channel(&self) -> ChannelRef {
-        let lock = self.server_state.lock().await;
+    pub fn get_user(&self, r: UserRef) -> Option<User> {
+        self.server_state.lock().unwrap().user(r.session_id()).cloned()
+    }
+
+    pub fn channel(&self) -> ChannelRef {
+        let lock = self.server_state.lock().unwrap();
 
         let user = self.session.get(&lock).unwrap();
         user.channel()
-    }
-
-    pub fn server_state(&self) -> Arc<Mutex<ServerState>> {
-        self.server_state.clone()
     }
 
     pub fn audio_input(&self) -> NodeIndex {

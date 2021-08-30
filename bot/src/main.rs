@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 use std::cmp::min;
 use std::fmt;
+use std::fmt::Write;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use log::{info, LevelFilter};
@@ -13,12 +15,11 @@ use sqlx::ConnectOptions;
 use tokio::time::interval;
 use uuid::Uuid;
 
+use audiopipe::aaaaaaa::Core;
 use mumble::{Event as MumbleEvent, MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
 
 use crate::player::{Event as RoomEvent, Room};
-use audiopipe::aaaaaaa::Core;
-use std::sync::Arc;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -66,11 +67,14 @@ async fn main() {
 
     let ac = Arc::new(Core::new(48000));
 
-    let client =
-        mumble::MumbleClient::connect(&config.mumble_domain, config.mumble_port, mumble_config, &ac)
-            .await
-            .unwrap();
-    let st = client.server_state();
+    let client = mumble::MumbleClient::connect(
+        &config.mumble_domain,
+        config.mumble_port,
+        mumble_config,
+        &ac,
+    )
+    .await
+    .unwrap();
 
     let mut r = client.event_subscriber();
 
@@ -98,11 +102,9 @@ async fn main() {
 
                 match ev {
                     MumbleEvent::Message { actor, message, .. } => {
-                        let st = st.lock().await;
-
                         let name: Cow<_> = match actor {
                             None => "<unknown>".into(),
-                            Some(r) => r.get(&st).unwrap().name().to_string().into(),
+                            Some(r) => client.get_user(r).unwrap().name().to_string().into(),
                         };
 
                         match &*message {
@@ -115,6 +117,22 @@ async fn main() {
                             ";play" => {
                                 room.play().await;
                             }
+                            ";list" => {
+                                let pl = room.playlist();
+                                let mut message = String::new();
+
+                                if let Some(id) = pl.id() {
+                                    writeln!(message, "{} ({})", pl.title(), id).unwrap();
+                                } else {
+                                    writeln!(message, "{}", pl.title()).unwrap();
+                                }
+
+                                for entry in pl.entries() {
+                                    println!("{:?}", entry);
+                                }
+
+                                client.send_channel_message(&message).await;
+                            }
                             ";quit" => {
                                 break;
                             }
@@ -122,8 +140,6 @@ async fn main() {
                         }
 
                         println!("{}: {}", name, message);
-
-                        drop(st);
                     }
                     _ => {}
                 }

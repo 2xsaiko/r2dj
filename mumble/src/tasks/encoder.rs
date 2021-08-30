@@ -3,13 +3,13 @@ use std::time::Duration;
 
 use audiopus::{Application, Channels, SampleRate};
 use bytes::Bytes;
-use dasp::{Signal, Frame, Sample};
+use dasp::sample::ToSample;
+use dasp::{Frame, Sample, Signal};
 use log::debug;
 use mumble_protocol::voice::VoicePacketPayload;
 use tokio::select;
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio::time;
-use dasp::sample::ToSample;
 
 pub(super) async fn encoder<S>(
     voice_tx: mpsc::Sender<VoicePacketPayload>,

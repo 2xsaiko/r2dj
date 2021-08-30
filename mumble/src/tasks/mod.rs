@@ -2,25 +2,26 @@ use std::fmt::Debug;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use futures::{Sink, SinkExt, Stream, StreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt, TryFutureExt};
 use log::{debug, error};
 use mumble_protocol::control::{msgs, ControlPacket};
 use mumble_protocol::voice::{VoicePacket, VoicePacketPayload};
 use mumble_protocol::{Clientbound, Serverbound};
+use petgraph::graph::NodeIndex;
 use tokio::select;
-use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use tokio::sync::{broadcast, mpsc, watch, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
+use audiopipe::aaaaaaa::{Core, OutputSignal};
+use audiopipe::mixer::{new_mixer, MixerInput, MixerOutput};
 use encoder::encoder;
 
-use audiopipe::mixer::{new_mixer, MixerInput, MixerOutput};
 use crate::event::Event;
 use crate::server_state::{ChannelRef, ServerState, UserRef};
-use audiopipe::aaaaaaa::{OutputSignal, Core};
-use petgraph::graph::NodeIndex;
 
 mod encoder;
 
@@ -50,8 +51,8 @@ pub struct Connectors {
     stop_recv: watch::Receiver<()>,
 
     // Private stuff
-    cp_rx: Arc<Mutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
-    m_out: Arc<Mutex<OutputSignal<2>>>,
+    cp_rx: Arc<AsyncMutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
+    m_out: Arc<AsyncMutex<OutputSignal<2>>>,
 }
 
 impl Connectors {
@@ -65,8 +66,8 @@ impl Connectors {
             cp_tx,
             event_chan,
             stop_recv,
-            cp_rx: Arc::new(Mutex::new(cp_rx)),
-            m_out: Arc::new(Mutex::new(output)),
+            cp_rx: Arc::new(AsyncMutex::new(cp_rx)),
+            m_out: Arc::new(AsyncMutex::new(output)),
         }
     }
 
@@ -268,7 +269,7 @@ async fn pinger(
 }
 
 async fn tcp_sender<T>(
-    source: Arc<Mutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
+    source: Arc<AsyncMutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
     mut socket: T,
     mut stop_recv: watch::Receiver<()>,
 ) where
@@ -277,7 +278,7 @@ async fn tcp_sender<T>(
 {
     let mut source = source.lock().await;
 
-    let op = async move {
+    let op = async {
         while let Some(packet) = source.recv().await {
             socket.send(packet).await.unwrap();
         }
@@ -287,6 +288,9 @@ async fn tcp_sender<T>(
         _ = stop_recv.changed() => {},
         _ = op => {},
     }
+
+    socket.flush().await.unwrap();
+    socket.close().await.unwrap();
 
     debug!("tcp sender exit");
 }
@@ -302,17 +306,18 @@ async fn udp_sender<T>(
     while let Some(packet) = source.recv().await {
         socket.send((packet, addr)).await.unwrap();
     }
+
     debug!("udp sender exit");
 }
 
 async fn handle_control_packet(is: &InternalState, msg: ControlPacket<Clientbound>) {
     match msg {
         ControlPacket::Ping(p) => handle_ping(is, *p).await,
-        ControlPacket::UserState(p) => handle_user_state(is, *p).await,
-        ControlPacket::UserRemove(p) => handle_user_remove(is, *p).await,
-        ControlPacket::ChannelState(p) => handle_channel_state(is, *p).await,
-        ControlPacket::ChannelRemove(p) => handle_channel_remove(is, *p).await,
-        ControlPacket::TextMessage(p) => handle_text_message(is, *p).await,
+        ControlPacket::UserState(p) => handle_user_state(is, *p),
+        ControlPacket::UserRemove(p) => handle_user_remove(is, *p),
+        ControlPacket::ChannelState(p) => handle_channel_state(is, *p),
+        ControlPacket::ChannelRemove(p) => handle_channel_remove(is, *p),
+        ControlPacket::TextMessage(p) => handle_text_message(is, *p),
         _ => {
             debug!("Unhandled packet: {:?}", msg);
         }
@@ -330,26 +335,26 @@ async fn handle_ping(_is: &InternalState, _msg: msgs::Ping) {
     // TODO
 }
 
-async fn handle_user_state(is: &InternalState, msg: msgs::UserState) {
-    is.server_state.lock().await.update_user(msg);
+fn handle_user_state(is: &InternalState, msg: msgs::UserState) {
+    is.server_state.lock().unwrap().update_user(msg);
 }
 
-async fn handle_user_remove(is: &InternalState, msg: msgs::UserRemove) {
-    is.server_state.lock().await.remove_user(msg.get_session());
+fn handle_user_remove(is: &InternalState, msg: msgs::UserRemove) {
+    is.server_state.lock().unwrap().remove_user(msg.get_session());
 }
 
-async fn handle_channel_state(is: &InternalState, msg: msgs::ChannelState) {
-    is.server_state.lock().await.update_channel(msg);
+fn handle_channel_state(is: &InternalState, msg: msgs::ChannelState) {
+    is.server_state.lock().unwrap().update_channel(msg);
 }
 
-async fn handle_channel_remove(is: &InternalState, msg: msgs::ChannelRemove) {
+fn handle_channel_remove(is: &InternalState, msg: msgs::ChannelRemove) {
     is.server_state
         .lock()
-        .await
+        .unwrap()
         .remove_channel(msg.get_channel_id());
 }
 
-async fn handle_text_message(is: &InternalState, mut msg: msgs::TextMessage) {
+fn handle_text_message(is: &InternalState, mut msg: msgs::TextMessage) {
     let actor = if msg.has_actor() {
         Some(UserRef::new(msg.get_actor()))
     } else {

@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use log::{debug, error, info};
 use mumble_protocol::control::{msgs, ControlPacket};
@@ -7,7 +8,6 @@ use mumble_protocol::crypt::ClientCryptState;
 use mumble_protocol::Clientbound;
 use thiserror::Error;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::webpki::DNSNameRef;
@@ -96,22 +96,22 @@ pub async fn handle_packet(
             }
         },
         ControlPacket::UserState(p) => {
-            let mut st = server_state.lock().await;
+            let mut st = server_state.lock().unwrap();
             st.update_user(*p);
             ResultAction::Continue(state)
         }
         ControlPacket::UserRemove(p) => {
-            let mut st = server_state.lock().await;
+            let mut st = server_state.lock().unwrap();
             st.remove_user(p.get_session());
             ResultAction::Continue(state)
         }
         ControlPacket::ChannelState(p) => {
-            let mut st = server_state.lock().await;
+            let mut st = server_state.lock().unwrap();
             st.update_channel(*p);
             ResultAction::Continue(state)
         }
         ControlPacket::ChannelRemove(p) => {
-            let mut st = server_state.lock().await;
+            let mut st = server_state.lock().unwrap();
             st.remove_channel(p.get_channel_id());
             ResultAction::Continue(state)
         }

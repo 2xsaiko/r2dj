@@ -17,7 +17,7 @@ pub struct Playlist {
 }
 
 #[derive(Debug, Clone)]
-enum PlaylistLike {
+pub enum PlaylistLike {
     Track(Track),
     Playlist(Playlist),
 }
@@ -97,6 +97,18 @@ impl Playlist {
             })
         }
         .boxed()
+    }
+
+    pub fn id(&self) -> Option<Uuid> {
+        self.persistent_id
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn entries(&self) -> &[PlaylistLike] {
+        &self.entries
     }
 
     fn add(&mut self, entry: PlaylistLike) {

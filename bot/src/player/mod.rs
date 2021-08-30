@@ -14,28 +14,33 @@ pub use playlist::*;
 use crate::player::track::Track;
 use audiopipe::aaaaaaa::{AudioSource, Core};
 use petgraph::graph::NodeIndex;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub mod import;
 mod playlist;
 mod track;
-
-struct RoomData {
-    mode: PlayMode,
-    playlist: Playlist,
-    track_state: Option<TrackState>,
-    player: Option<Player<AudioSource<2>>>,
-    player_receiver: Option<broadcast::Receiver<PlayerEvent>>,
-    audio_out: NodeIndex,
-    ac: Arc<Core>,
-    event_tx: broadcast::Sender<Event>,
-}
 
 pub struct Room {
     id: Uuid,
     clients: Vec<Client>,
     tx: mpsc::Sender<Message>,
     event_tx: broadcast::Sender<Event>,
+    shared: Arc<Mutex<Shared>>,
+}
+
+struct RoomService {
+    player: Option<Player<AudioSource<2>>>,
+    player_receiver: Option<broadcast::Receiver<PlayerEvent>>,
+    audio_out: NodeIndex,
+    ac: Arc<Core>,
+    event_tx: broadcast::Sender<Event>,
+    shared: Arc<Mutex<Shared>>,
+}
+
+struct Shared {
+    mode: PlayMode,
+    playlist: Playlist,
+    track_state: Option<TrackState>,
 }
 
 pub enum Client {
@@ -51,15 +56,19 @@ impl Room {
     pub fn new(audio_out: NodeIndex, ac: Arc<Core>) -> Self {
         let (event_tx, _) = broadcast::channel(20);
 
-        let rd = RoomData {
+        let shared = Arc::new(Mutex::new(Shared {
             mode: PlayMode::Repeat,
             playlist: Playlist::new(),
             track_state: None,
+        }));
+
+        let rd = RoomService {
             player: None,
             player_receiver: None,
             audio_out,
             ac,
             event_tx: event_tx.clone(),
+            shared: shared.clone(),
         };
 
         let (tx, rx) = mpsc::channel(20);
@@ -71,6 +80,7 @@ impl Room {
             clients: vec![],
             tx,
             event_tx,
+            shared,
         };
 
         r
@@ -96,15 +106,19 @@ impl Room {
         self.tx.send(Message::SetPlaylist(playlist)).await.unwrap();
     }
 
+    pub fn playlist(&self) -> Playlist {
+        self.shared.lock().unwrap().playlist.clone()
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.event_tx.subscribe()
     }
 }
 
-impl RoomData {
+impl RoomService {
     fn get_next(&mut self) -> Track {
         // TODO song queuing
-        self.playlist.next()
+        self.shared.lock().unwrap().playlist.next()
     }
 
     async fn skip(&mut self) {
@@ -134,7 +148,7 @@ impl RoomData {
     }
 }
 
-async fn run_room(mut data: RoomData, mut rx: mpsc::Receiver<Message>) {
+async fn run_room(mut data: RoomService, mut rx: mpsc::Receiver<Message>) {
     loop {
         let mut player_receiver = data.player_receiver.take();
         let player_fut = FutureOption::new(player_receiver.as_mut().map(|el| el.recv()));
@@ -165,7 +179,7 @@ async fn run_room(mut data: RoomData, mut rx: mpsc::Receiver<Message>) {
                         todo!()
                     }
                     Message::SetPlaylist(pl) => {
-                        data.playlist = pl;
+                        data.shared.lock().unwrap().playlist = pl;
                         data.skip().await;
                     }
                 }
