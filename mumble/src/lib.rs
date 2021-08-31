@@ -194,12 +194,12 @@ fn get_version_packet() -> msgs::Version {
     msg.set_version(0x00010204);
     msg.set_release(format!("{} {}", "mumble-rs", CRATE_VERSION));
     let info = sysinfo::System::new();
-    msg.set_os(info.get_name().unwrap_or_else(|| "unknown".to_string()));
+    msg.set_os(info.name().unwrap_or_else(|| "unknown".to_string()));
     msg.set_os_version(format!(
         "{}; {}",
-        info.get_os_version()
+        info.os_version()
             .unwrap_or_else(|| "unknown".to_string()),
-        info.get_kernel_version()
+        info.kernel_version()
             .unwrap_or_else(|| "unknown".to_string())
     ));
     msg
