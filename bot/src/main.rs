@@ -19,7 +19,7 @@ use audiopipe::aaaaaaa::Core;
 use mumble::{Event as MumbleEvent, MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
 
-use crate::player::{Event as RoomEvent, Room};
+use crate::player::{Event as RoomEvent, Room, Playlist};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -133,7 +133,9 @@ async fn main() {
                                 }
 
                                 client.message_my_channel(&message).await;
-                                client.message_user(actor.unwrap(), "hi").await;
+                            }
+                            ";new" => {
+                                room.set_playlist(Playlist::new()).await;
                             }
                             ";quit" => {
                                 break;
@@ -170,6 +172,11 @@ async fn main() {
                     RoomEvent::TrackChanged(t, len) => {
                         rst.title = t.title().unwrap_or("Unnamed Track").to_string();
                         rst.total_duration = len;
+                        update_status(&client, &mut prev_rst, &rst).await;
+                    }
+                    RoomEvent::TrackCleared => {
+                        rst.title = "(none)".to_string();
+                        rst.total_duration = Duration::ZERO;
                         update_status(&client, &mut prev_rst, &rst).await;
                     }
                 }

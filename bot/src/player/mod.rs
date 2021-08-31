@@ -116,7 +116,7 @@ impl Room {
 }
 
 impl RoomService {
-    fn get_next(&mut self) -> Track {
+    fn get_next(&mut self) -> Option<Track> {
         // TODO song queuing
         self.shared.lock().unwrap().playlist.next()
     }
@@ -131,20 +131,25 @@ impl RoomService {
         };
 
         let tr = self.get_next();
-        let path = tr.providers().first().unwrap().media_path().await.unwrap();
-        let out = self.ac.add_input_to(Some(self.audio_out));
-        let player = Player::new(path, out).unwrap();
-        self.player_receiver = Some(player.event_listener());
 
-        if playing {
-            player.play().await;
+        if let Some(tr) = tr {
+            let path = tr.providers().first().unwrap().media_path().await.unwrap();
+            let out = self.ac.add_input_to(Some(self.audio_out));
+            let player = Player::new(path, out).unwrap();
+            self.player_receiver = Some(player.event_listener());
+
+            if playing {
+                player.play().await;
+            }
+
+            let length = player.length();
+
+            self.player = Some(player);
+
+            let _ = self.event_tx.send(Event::TrackChanged(tr, length));
+        } else {
+            let _ = self.event_tx.send(Event::TrackCleared);
         }
-
-        let length = player.length();
-
-        self.player = Some(player);
-
-        let _ = self.event_tx.send(Event::TrackChanged(tr, length));
     }
 }
 
@@ -229,6 +234,7 @@ enum Message {
 pub enum Event {
     PlayerEvent(PlayerEvent),
     TrackChanged(Track, Duration),
+    TrackCleared,
 }
 
 pin_project! {

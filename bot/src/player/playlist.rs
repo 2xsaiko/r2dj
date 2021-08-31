@@ -1,5 +1,5 @@
-use futures::future::BoxFuture;
 use futures::{FutureExt, TryStreamExt};
+use futures::future::BoxFuture;
 use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -119,14 +119,24 @@ impl Playlist {
         self.add(PlaylistLike::Track(track));
     }
 
-    pub fn next(&mut self) -> Track {
-        self.pick_nth(
-            self.shuffle,
-            select_next(self.length(), &self.last_played, self.shuffle),
-        )
+    pub fn next(&mut self) -> Option<Track> {
+        if !self.has_tracks() {
+            None
+        } else {
+            // we have at least one track that we can play, so let's just keep trying
+            loop {
+                let r = self.pick_nth(
+                    self.shuffle,
+                    select_next(self.length(), &self.last_played, self.shuffle),
+                );
+                if let Some(r) = r {
+                    break Some(r);
+                }
+            }
+        }
     }
 
-    fn pick_nth(&mut self, shuffled: bool, idx: usize) -> Track {
+    fn pick_nth(&mut self, shuffled: bool, idx: usize) -> Option<Track> {
         let next = if self.shuffle && !shuffled {
             select_next_random(self.length(), &self.last_played)
         } else {
@@ -191,6 +201,10 @@ impl Playlist {
         }
     }
 
+    pub fn has_tracks(&self) -> bool {
+        self.entries.iter().any(|el| el.has_tracks())
+    }
+
     fn add_play_last(&mut self, idx: usize) {
         if let Some(idx_idx) = self.last_played.iter().position(|&el| el == idx) {
             self.last_played.copy_within(idx_idx + 1.., idx_idx);
@@ -203,18 +217,18 @@ impl Playlist {
 }
 
 impl PlaylistLike {
-    pub fn next(&mut self) -> Track {
+    pub fn next(&mut self) -> Option<Track> {
         match self {
-            PlaylistLike::Track(tr) => tr.clone(),
+            PlaylistLike::Track(tr) => Some(tr.clone()),
             PlaylistLike::Playlist(pl) => pl.next(),
         }
     }
 
-    pub fn pick_nth(&mut self, shuffled: bool, idx: usize) -> Track {
+    pub fn pick_nth(&mut self, shuffled: bool, idx: usize) -> Option<Track> {
         match self {
             PlaylistLike::Track(tr) => {
                 assert_eq!(0, idx);
-                tr.clone()
+                Some(tr.clone())
             }
             PlaylistLike::Playlist(pl) => pl.pick_nth(shuffled, idx),
         }
@@ -231,6 +245,13 @@ impl PlaylistLike {
         match self {
             PlaylistLike::Track(_) => 1,
             PlaylistLike::Playlist(pl) => pl.length(),
+        }
+    }
+
+    pub fn has_tracks(&self) -> bool {
+        match self {
+            PlaylistLike::Track(_) => true,
+            PlaylistLike::Playlist(pl) => pl.has_tracks(),
         }
     }
 
@@ -316,7 +337,7 @@ fn add_last(vec: &mut Vec<usize>, idx: usize) {
 
 #[cfg(test)]
 mod test {
-    use super::{add_last, select_next, Playlist, PlaylistLike, PlaylistMode, Track};
+    use super::{add_last, Playlist, PlaylistLike, PlaylistMode, select_next, Track};
 
     #[test]
     fn test_random_dist() {
