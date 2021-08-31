@@ -414,16 +414,8 @@ impl<const CHANNELS: usize> dasp_graph::Node for OutputNode<CHANNELS> {
             }
         }
 
-        let mut overflow = 0;
-
         for el in output.iter() {
-            if let Some(_) = shared.buffer.push(*el) {
-                overflow += 1;
-            }
-        }
-
-        if overflow > 0 {
-            warn!("buffer overflow: {} samples dropped", overflow);
+            shared.buffer.push(*el);
         }
     }
 }
