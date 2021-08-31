@@ -1,6 +1,7 @@
 data_dir data/
 
 mumble dblsaiko.net 64738
+mumble_cert cert.pem
 name r2dj
 
 db_url "postgres://r2dj:r2dj@localhost/r2dj"

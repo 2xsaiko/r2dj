@@ -70,6 +70,7 @@ async fn main() {
     let client = mumble::MumbleClient::connect(
         &config.mumble_domain,
         config.mumble_port,
+        config.mumble_cert,
         mumble_config,
         &ac,
     )
@@ -267,6 +268,7 @@ pub struct LaunchConfig {
     // temporary
     pub mumble_domain: String,
     pub mumble_port: u16,
+    pub mumble_cert: Option<String>,
     pub name: String,
 }
 
@@ -280,6 +282,7 @@ fn load_config() -> LaunchConfig {
     let mut db_pool_size = None;
     let mut db_pool_size_min = None;
     let mut mumble = None;
+    let mut mumble_cert = None;
     let mut name = None;
 
     let mut cd = CommandDispatcher::new(SimpleExecutor::new(|cmd, args| match cmd {
@@ -323,6 +326,7 @@ fn load_config() -> LaunchConfig {
                     .expect("mumble second param must be port"),
             ))
         }
+        "mumble_cert" => mumble_cert = Some(args[0].to_string()),
         "name" => name = Some(args[0].to_string()),
         _ => eprintln!("Ignoring invalid bootstrap command '{}'!", cmd),
     }));
@@ -341,6 +345,7 @@ fn load_config() -> LaunchConfig {
         db_pool_size_min: db_pool_size_min.unwrap_or(db_pool_size),
         mumble_domain,
         mumble_port,
+        mumble_cert,
         name: name.unwrap_or_else(|| "r2dj".to_string()),
     }
 }

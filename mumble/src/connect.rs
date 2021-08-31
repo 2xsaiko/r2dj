@@ -14,12 +14,26 @@ use tokio_rustls::webpki::DNSNameRef;
 use tokio_rustls::TlsConnector;
 
 use crate::server_state::ServerState;
+use std::path::Path;
+use std::io::Cursor;
 
-pub async fn connect(domain: &str, ip: u16) -> Result<TlsStream<TcpStream>, ConnectError> {
+pub async fn connect(domain: &str, ip: u16, certfile: Option<impl AsRef<Path>>) -> Result<TlsStream<TcpStream>, ConnectError> {
     let mut config = ClientConfig::new();
     config
         .root_store
         .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+
+    if let Some(certfile) = certfile {
+        let certfile = certfile.as_ref();
+        let content = tokio::fs::read(certfile).await.unwrap();
+        let mut cursor = Cursor::new(&content);
+        let certs = rustls::internal::pemfile::certs(&mut cursor).unwrap();
+        let mut cursor = Cursor::new(&content);
+        let mut pks = rustls::internal::pemfile::pkcs8_private_keys(&mut cursor).unwrap();
+
+        config.set_single_client_cert(certs, pks.remove(0)).unwrap();
+    }
+
     let stream = TcpStream::connect(format!("{}:{}", domain, ip)).await?;
     let connector = TlsConnector::from(Arc::new(config));
     Ok(connector

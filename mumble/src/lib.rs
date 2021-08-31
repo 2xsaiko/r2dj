@@ -21,6 +21,7 @@ use crate::connect::{HandshakeState, ResultAction};
 pub use crate::event::Event;
 use crate::server_state::{ChannelRef, ServerState, User, UserRef};
 use crate::tasks::{ConnectionInfo, Connectors};
+use std::path::Path;
 
 mod connect;
 mod event;
@@ -46,6 +47,7 @@ impl MumbleClient {
     pub async fn connect(
         host: &str,
         port: u16,
+        certfile: Option<impl AsRef<Path>>,
         config: MumbleConfig,
         ac: &Core,
     ) -> Result<Self, ()> {
@@ -55,7 +57,11 @@ impl MumbleClient {
         // actually connect
 
         info!("Connecting to {}, port {}", host, port);
-        let stream = connect::connect(host, port)
+        if let Some(certfile) = &certfile {
+            info!("Using certificate '{}'", certfile.as_ref().display());
+        }
+
+        let stream = connect::connect(host, port, certfile)
             .await
             .expect("failed to connect to server");
 
