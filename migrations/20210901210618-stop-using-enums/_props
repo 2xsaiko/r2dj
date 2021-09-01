@@ -1,0 +1,4 @@
+// Auto-generated migration metadata. Do not edit.
+id   0ad8f4c99ca64c63a9e26328f639ed47
+name "Stop using enums"
+date 1630530378

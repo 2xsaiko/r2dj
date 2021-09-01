@@ -1,0 +1,4 @@
+// Auto-generated migration metadata. Do not edit.
+id   a236548996d749908ecbaadfa31d8f9b
+name "Remove enum types"
+date 1630535977
