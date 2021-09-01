@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::bail;
 use chrono::{TimeZone, Utc};
 use cmdparser::{CommandDispatcher, ExecSource, SimpleExecutor};
-use sqlx::{Execute, PgConnection, Postgres};
+use sqlx::{Execute, PgConnection, Postgres, Transaction};
 use sqlx::postgres::PgRow;
 use sqlx::prelude::*;
 use sqlx::types::chrono::{DateTime, NaiveDateTime};
@@ -13,6 +13,7 @@ use tokio::fs;
 use tokio::io;
 use tokio::stream::StreamExt;
 use uuid::Uuid;
+use std::cmp::min;
 
 pub enum ApplyBehavior<'a> {
     All,
@@ -34,13 +35,15 @@ pub async fn apply_migration(db_url: &str, v: u64, b: &ApplyBehavior<'_>, dir: &
 
     available.sort_unstable_by(|a, b| a.date.cmp(&b.date));
 
-    let mut ta = db.begin().await?;
+    let root_ta = db.begin().await?;
+
+    let mut ta = root_ta.begin().await?;
     do_exec(&mut ta, include_str!("init.sql"), v >= 2).await?;
-    let mut db = ta.commit().await?;
+    let mut root_ta = ta.commit().await?;
 
     let applied: Vec<Uuid> = sqlx::query("SELECT id FROM __migtool_meta ORDER BY (run_at, id) ASC")
         .map(|row: PgRow| row.get::<Uuid, _>(0))
-        .fetch(&mut db)
+        .fetch(&mut root_ta)
         .fold(Ok(Vec::new()), |acc, a| match (acc, a) {
             (Ok(mut acc), Ok(a)) => {
                 acc.push(a);
@@ -87,7 +90,7 @@ pub async fn apply_migration(db_url: &str, v: u64, b: &ApplyBehavior<'_>, dir: &
     if unapply { queue.reverse(); }
 
     let queue = match b {
-        ApplyBehavior::Count(c) => &queue[..*c],
+        ApplyBehavior::Count(c) => &queue[..min(*c, queue.len())],
         ApplyBehavior::Until(e) => {
             let idx = queue.iter().enumerate()
                 .filter(|(_, m)| OsStr::new(e) == m.root.as_os_str())
@@ -110,18 +113,22 @@ pub async fn apply_migration(db_url: &str, v: u64, b: &ApplyBehavior<'_>, dir: &
         } else {
             println!("Unapplying migration {}", name);
         }
-        match run_migration(item, db, unapply, v).await {
+        match run_migration(item, root_ta, unapply, v).await {
             Err(e) => {
                 bail!("Failed to run migration: {}", e);
             }
-            Ok(a) => db = a,
+            Ok(a) => root_ta = a,
         }
+    }
+
+    if !pretend {
+        root_ta.commit().await?;
     }
 
     Ok(())
 }
 
-async fn run_migration(migration: &Migration, db: PgConnection, unapply: bool, v: u64) -> anyhow::Result<PgConnection> {
+async fn run_migration(migration: &Migration, db: Transaction<PgConnection>, unapply: bool, v: u64) -> anyhow::Result<Transaction<PgConnection>> {
     let src = if !unapply { migration.apply_source().await? } else { migration.unapply_source().await? };
 
     let name = migration.name.as_ref()
