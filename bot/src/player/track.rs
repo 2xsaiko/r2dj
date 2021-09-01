@@ -10,8 +10,6 @@ use tokio::process::Command;
 use url::Url;
 use uuid::Uuid;
 
-use crate::db::types::TrackProviderType;
-
 #[derive(Debug, Clone)]
 pub struct Track {
     id: Uuid,
@@ -52,7 +50,8 @@ impl Track {
             .await?;
 
         let providers: Vec<_> = sqlx::query!(
-            r#"SELECT id, type as "type: TrackProviderType", source FROM track_provider WHERE track = $1"#,
+            "SELECT id, local_path, url, spotify_id, youtube_id \
+             FROM track_provider WHERE track = $1",
             id
         )
         .fetch(db)
@@ -62,13 +61,16 @@ impl Track {
         let providers = providers
             .into_iter()
             .map(|el| {
-                let data = match el.r#type {
-                    TrackProviderType::Local => TrackProviderData::Local(el.source.into()),
-                    TrackProviderType::Url => TrackProviderData::Url(
-                        Url::parse(&el.source).expect("non-URL data in track_provider.source"),
-                    ),
-                    TrackProviderType::Spotify => unimplemented!(),
-                    TrackProviderType::Youtube => TrackProviderData::Youtube(el.source),
+                let data = if let Some(local_path) = el.local_path {
+                    TrackProviderData::Local(local_path.into())
+                } else if let Some(url) = el.url {
+                    TrackProviderData::Url(Url::parse(&url).expect("non-URL data in track_provider.url"))
+                } else if let Some(spotify_id) = el.spotify_id {
+                    unimplemented!()
+                } else if let Some(youtube_id) = el.youtube_id {
+                    TrackProviderData::Youtube(youtube_id)
+                } else {
+                    unreachable!()
                 };
 
                 TrackProvider { id: el.id, data }

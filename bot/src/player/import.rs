@@ -4,8 +4,6 @@ use thiserror::Error;
 use uuid::Uuid;
 use youtube_dl::{Playlist, SingleVideo, YoutubeDl, YoutubeDlOutput};
 
-use crate::db::types::ExternalSource;
-
 pub async fn create_yt_playlist(playlist_id: &str, db: &PgPool) -> Result<Uuid> {
     let pd = get_playlist_data(playlist_id)?;
     let title = pd.title.as_deref().unwrap_or("Imported Playlist");
@@ -16,8 +14,8 @@ pub async fn create_yt_playlist(playlist_id: &str, db: &PgPool) -> Result<Uuid> 
     let mut ta = db.begin().await?;
 
     sqlx::query!(
-        "INSERT INTO playlist (id, title, external_source_type, external_source, created) \
-         VALUES ($1, $2, 'youtube', $3, $4)",
+        "INSERT INTO playlist (id, title, youtube_id, created) \
+         VALUES ($1, $2, $3, $4)",
         id,
         title,
         playlist_id,
@@ -34,9 +32,7 @@ pub async fn create_yt_playlist(playlist_id: &str, db: &PgPool) -> Result<Uuid> 
 
 pub async fn update_playlist<E>(id: &Uuid, db: &PgPool) -> Result<()> {
     let q = sqlx::query!(
-        r#"SELECT
-               external_source_type as "external_source_type: ExternalSource",
-               external_source
+        r#"SELECT spotify_id, youtube_id
            FROM playlist
            WHERE playlist.id = $1"#,
         id,
@@ -44,12 +40,7 @@ pub async fn update_playlist<E>(id: &Uuid, db: &PgPool) -> Result<()> {
     .fetch_one(db)
     .await?;
 
-    let (t, src) = match (q.external_source_type, q.external_source) {
-        (Some(t), Some(src)) => (t, src),
-        (_, _) => return Ok(()),
-    };
-
-    assert_eq!(ExternalSource::Youtube, t);
+    let src = q.youtube_id.expect("only youtube sync is implemented");
 
     let pd = get_playlist_data(&src)?;
 
@@ -100,7 +91,7 @@ async fn get_or_create_yt_track(
     let existing = sqlx::query!(
         "SELECT t.id FROM track t \
          INNER JOIN track_provider tp ON tp.track = t.id \
-         WHERE tp.type = 'youtube' AND tp.source = $1",
+         WHERE tp.youtube_id = $1",
         &video_meta.id
     )
     .fetch_optional(&mut *db)
@@ -121,8 +112,8 @@ async fn get_or_create_yt_track(
         .await?;
 
         sqlx::query!(
-            "INSERT INTO track_provider (id, track, type, source) \
-             VALUES ($1, $2, 'youtube', $3)",
+            "INSERT INTO track_provider (id, track, youtube_id) \
+             VALUES ($1, $2, $3)",
             Uuid::new_v4(),
             id,
             video_meta.id,
