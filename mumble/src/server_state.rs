@@ -5,6 +5,7 @@ use mumble_protocol::control::msgs;
 use tokio::sync::broadcast;
 
 use crate::Event;
+use crate::event::UserMoved;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ChannelRef {
@@ -38,6 +39,7 @@ pub struct User {
 pub struct ServerState {
     channels: HashMap<u32, Channel>,
     users: HashMap<u32, User>,
+    max_message_length: Option<u32>,
     event_subscriber: broadcast::Sender<Event>,
 }
 
@@ -130,6 +132,7 @@ impl ServerState {
         ServerState {
             channels: Default::default(),
             users: Default::default(),
+            max_message_length: None,
             event_subscriber,
         }
     }
@@ -163,14 +166,18 @@ impl ServerState {
         if state.has_channel_id() {
             let new = ChannelRef::new(state.get_channel_id());
             if user.channel != new {
-                let _ = self.event_subscriber.send(Event::UserMoved {
+                let _ = self.event_subscriber.send(Event::UserMoved(UserMoved {
                     user: user.to_ref(),
                     old_channel: user.channel,
                     new_channel: new,
-                });
+                }));
                 user.channel = new;
             }
         }
+    }
+
+    pub fn max_message_length(&self) -> Option<u32> {
+        self.max_message_length
     }
 
     pub fn remove_user(&mut self, session_id: u32) {
@@ -222,5 +229,11 @@ impl ServerState {
 
     pub fn remove_channel(&mut self, channel_id: u32) {
         self.channels.remove(&channel_id);
+    }
+
+    pub fn update_server_config(&mut self, config: msgs::ServerConfig) {
+        if config.has_message_length() {
+            self.max_message_length = Some(config.get_message_length());
+        }
     }
 }

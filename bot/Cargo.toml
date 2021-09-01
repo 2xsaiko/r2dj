@@ -11,6 +11,7 @@ mumble = { path = "../mumble" }
 player2x = { path = "../player2x" }
 audiopipe = { path = "../audiopipe" }
 
+clap = "3.0.0-beta.4"
 tokio = { version = "1.2.0", features = ["full"] }
 thiserror = "1.0.24"
 tokio-util = { version = "0.6.3", features = ["net"] }
@@ -30,6 +31,7 @@ pin-project-lite = "0.2.6"
 dasp = "0.11.0"
 dasp_graph = "0.11.0"
 petgraph = "0.5.1"
+async-trait = "0.1.51"
 
 [build-dependencies]
 cmdparser = { git = "https://git.2x.ax/~saiko/cmdparser", default-features = false }

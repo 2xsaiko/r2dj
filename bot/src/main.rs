@@ -1,7 +1,5 @@
-use std::borrow::Cow;
 use std::cmp::min;
 use std::fmt;
-use std::fmt::Write;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -16,14 +14,15 @@ use tokio::time::interval;
 use uuid::Uuid;
 
 use audiopipe::aaaaaaa::Core;
-use mumble::{Event as MumbleEvent, MumbleClient, MumbleConfig};
+use mumble::{MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
 
-use crate::player::{Event as RoomEvent, Room, Playlist};
+use crate::player::{Event as RoomEvent, Room};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+mod commands;
 mod config;
 mod db;
 mod player;
@@ -87,13 +86,15 @@ async fn main() {
     let mut rst = RoomStatus::default();
     let mut update_timer = interval(Duration::from_secs(5));
 
+    let bot = Bot { client, room };
+
     // let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
     // player.play().await;
 
     loop {
         tokio::select! {
             _ = update_timer.tick() => {
-                update_status(&client, &mut prev_rst, &rst).await;
+                update_status(&bot.client, &mut prev_rst, &rst).await;
             }
             ev = r.recv() => {
                 let ev = match ev {
@@ -102,49 +103,7 @@ async fn main() {
                 };
 
                 match ev {
-                    MumbleEvent::Message { actor, message, .. } => {
-                        let name: Cow<_> = match actor {
-                            None => "<unknown>".into(),
-                            Some(r) => client.get_user(r).unwrap().name().to_string().into(),
-                        };
-
-                        match &*message {
-                            ";skip" => {
-                                room.next().await;
-                            }
-                            ";pause" => {
-                                room.pause().await;
-                            }
-                            ";play" => {
-                                room.play().await;
-                            }
-                            ";list" => {
-                                let pl = room.playlist();
-                                let mut message = String::new();
-
-                                if let Some(id) = pl.id() {
-                                    writeln!(message, "{} ({})", pl.title(), id).unwrap();
-                                } else {
-                                    writeln!(message, "{}", pl.title()).unwrap();
-                                }
-
-                                for entry in pl.entries() {
-                                    println!("{:?}", entry);
-                                }
-
-                                client.message_my_channel(&message).await;
-                            }
-                            ";new" => {
-                                room.set_playlist(Playlist::new()).await;
-                            }
-                            ";quit" => {
-                                break;
-                            }
-                            _ => {}
-                        }
-
-                        println!("{}: {}", name, message);
-                    }
+                    mumble::Event::Message(ev) => commands::handle_message_event(&bot, &ev).await,
                     _ => {}
                 }
             }
@@ -160,32 +119,37 @@ async fn main() {
                             PlayerEvent::Playing { now, pos } => {
                                 rst.playing_since = Some(now);
                                 rst.position = pos;
-                                update_status(&client, &mut prev_rst, &rst).await;
+                                update_status(&bot.client, &mut prev_rst, &rst).await;
                             },
                             PlayerEvent::Paused { pos, .. } => {
                                 rst.playing_since = None;
                                 rst.position = pos;
-                                update_status(&client, &mut prev_rst, &rst).await;
+                                update_status(&bot.client, &mut prev_rst, &rst).await;
                             },
                         }
                     }
                     RoomEvent::TrackChanged(t, len) => {
                         rst.title = t.title().unwrap_or("Unnamed Track").to_string();
                         rst.total_duration = len;
-                        update_status(&client, &mut prev_rst, &rst).await;
+                        update_status(&bot.client, &mut prev_rst, &rst).await;
                     }
                     RoomEvent::TrackCleared => {
                         rst.title = "(none)".to_string();
                         rst.total_duration = Duration::ZERO;
-                        update_status(&client, &mut prev_rst, &rst).await;
+                        update_status(&bot.client, &mut prev_rst, &rst).await;
                     }
                 }
             }
         }
     }
 
-    client.message_my_channel("quitting!").await;
-    client.close().await;
+    bot.client.message_my_channel("quitting!").await;
+    bot.client.close().await;
+}
+
+pub struct Bot {
+    client: MumbleClient,
+    room: Room,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

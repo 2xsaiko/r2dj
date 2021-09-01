@@ -24,7 +24,7 @@ use crate::tasks::{ConnectionInfo, Connectors};
 use std::path::Path;
 
 mod connect;
-mod event;
+pub mod event;
 mod server_state;
 mod tasks;
 
@@ -134,6 +134,16 @@ impl MumbleClient {
         self.broadcast_message([], [user], text).await;
     }
 
+    pub async fn respond(&self, ev: &event::Message, text: &str) {
+        let mut users = ev.receivers.clone();
+
+        if let Some(actor) = ev.actor {
+            users.push(actor);
+        }
+
+        self.broadcast_message(ev.channels.iter().cloned(), users.into_iter(), text).await;
+    }
+
     pub async fn broadcast_message<C, S>(&self, channels: C, users: S, text: &str)
     where
         C: IntoIterator<Item = ChannelRef>,
@@ -174,6 +184,14 @@ impl MumbleClient {
 
         let user = self.session.get(&lock).unwrap();
         user.channel()
+    }
+
+    pub fn max_message_length(&self) -> Option<u32> {
+        self.server_state.lock().unwrap().max_message_length()
+    }
+
+    pub fn allow_html_messages(&self) -> Option<bool> {
+        todo!()
     }
 
     pub fn audio_input(&self) -> NodeIndex {

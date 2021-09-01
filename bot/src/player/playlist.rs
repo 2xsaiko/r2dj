@@ -1,5 +1,5 @@
-use futures::{FutureExt, TryStreamExt};
 use futures::future::BoxFuture;
+use futures::{FutureExt, TryStreamExt};
 use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -107,6 +107,13 @@ impl Playlist {
         &self.title
     }
 
+    pub fn set_title<S>(&mut self, title: S)
+    where
+        S: Into<String>,
+    {
+        self.title = title.into();
+    }
+
     pub fn entries(&self) -> &[PlaylistLike] {
         &self.entries
     }
@@ -117,6 +124,10 @@ impl Playlist {
 
     pub fn add_track(&mut self, track: Track) {
         self.add(PlaylistLike::Track(track));
+    }
+
+    pub fn add_playlist(&mut self, playlist: Playlist) {
+        self.add(PlaylistLike::Playlist(playlist));
     }
 
     pub fn next(&mut self) -> Option<Track> {
@@ -194,6 +205,10 @@ impl Playlist {
         self.shuffle = shuffle;
     }
 
+    pub fn shuffle(&self) -> bool {
+        self.shuffle
+    }
+
     pub fn length(&self) -> usize {
         match self.playlist_mode {
             PlaylistMode::Flatten => self.entries.iter().map(|el| el.length()).sum(),
@@ -259,6 +274,13 @@ impl PlaylistLike {
         match self {
             PlaylistLike::Track(_) => false,
             PlaylistLike::Playlist(pl) => pl.shuffle,
+        }
+    }
+
+    pub fn title(&self) -> Option<&str> {
+        match self {
+            PlaylistLike::Track(t) => t.title(),
+            PlaylistLike::Playlist(pl) => Some(pl.title()),
         }
     }
 }
@@ -337,7 +359,7 @@ fn add_last(vec: &mut Vec<usize>, idx: usize) {
 
 #[cfg(test)]
 mod test {
-    use super::{add_last, Playlist, PlaylistLike, PlaylistMode, select_next, Track};
+    use super::{add_last, select_next, Playlist, PlaylistLike, PlaylistMode, Track};
 
     #[test]
     fn test_random_dist() {

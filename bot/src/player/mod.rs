@@ -110,6 +110,10 @@ impl Room {
         self.shared.lock().unwrap().playlist.clone()
     }
 
+    pub fn add_playlist(&self, playlist: Playlist) {
+        self.shared.lock().unwrap().playlist.add_playlist(playlist);
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.event_tx.subscribe()
     }

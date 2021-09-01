@@ -20,7 +20,7 @@ use audiopipe::aaaaaaa::{Core, OutputSignal};
 use audiopipe::mixer::{new_mixer, MixerInput, MixerOutput};
 use encoder::encoder;
 
-use crate::event::Event;
+use crate::event::{Event, Message};
 use crate::server_state::{ChannelRef, ServerState, UserRef};
 
 mod encoder;
@@ -318,6 +318,7 @@ async fn handle_control_packet(is: &InternalState, msg: ControlPacket<Clientboun
         ControlPacket::ChannelState(p) => handle_channel_state(is, *p),
         ControlPacket::ChannelRemove(p) => handle_channel_remove(is, *p),
         ControlPacket::TextMessage(p) => handle_text_message(is, *p),
+        ControlPacket::ServerConfig(p) => handle_server_config(is, *p),
         _ => {
             debug!("Unhandled packet: {:?}", msg);
         }
@@ -368,12 +369,16 @@ fn handle_text_message(is: &InternalState, mut msg: msgs::TextMessage) {
         .collect();
     let message = msg.take_message();
 
-    let event = Event::Message {
+    let event = Event::Message(Message {
         actor,
         receivers,
         channels,
         message,
-    };
+    });
 
     let _ = is.ic.event_chan.send(event);
+}
+
+fn handle_server_config(is: &InternalState, msg: msgs::ServerConfig) {
+    is.server_state.lock().unwrap().update_server_config(msg);
 }
