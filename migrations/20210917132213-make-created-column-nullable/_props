@@ -1,0 +1,4 @@
+// Auto-generated migration metadata. Do not edit.
+id   654c79c218a040feb5d920c76f634213
+name "Make created column nullable"
+date 1631884933
