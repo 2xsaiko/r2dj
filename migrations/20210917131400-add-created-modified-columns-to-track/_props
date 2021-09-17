@@ -1,0 +1,4 @@
+// Auto-generated migration metadata. Do not edit.
+id   6b0f8268672d42c0994dff26e30b6040
+name "Add created/modified columns to track"
+date 1631884440
