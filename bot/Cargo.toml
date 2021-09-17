@@ -22,7 +22,7 @@ cmdparser = { git = "https://git.2x.ax/~saiko/cmdparser" }
 uuid = { version = "0.8.2", features = ["v4"] }
 librespot = "0.1.6"
 rand = "0.8.3"
-sqlx = { version = "0.5.1", default-features = false, features = ["postgres", "runtime-tokio-rustls", "uuid", "macros", "chrono"] }
+sqlx = { version = "0.5.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "uuid", "macros", "chrono"] }
 url = "2.2.1"
 chrono = "0.4.19"
 youtube_dl = "0.6.1"
@@ -32,6 +32,7 @@ dasp = "0.11.0"
 dasp_graph = "0.11.0"
 petgraph = "0.5.1"
 async-trait = "0.1.51"
+either = "1.6.1"
 
 [build-dependencies]
 cmdparser = { git = "https://git.2x.ax/~saiko/cmdparser", default-features = false }
