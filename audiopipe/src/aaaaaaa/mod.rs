@@ -409,7 +409,7 @@ impl<const CHANNELS: usize> dasp_graph::Node for OutputNode<CHANNELS> {
 
             for (ch, buffer) in input.buffers().iter().enumerate() {
                 for (idx, sample) in buffer.iter().enumerate() {
-                    output[idx][ch] = *sample;
+                    output[idx][ch] += *sample;
                 }
             }
         }
