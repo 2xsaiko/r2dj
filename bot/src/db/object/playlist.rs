@@ -12,6 +12,12 @@ pub struct Playlist {
     youtube_id: Option<String>,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum NestingMode {
+    Flatten,
+    RoundRobin,
+}
+
 impl_detach!(Playlist);
 
 impl Playlist {
@@ -46,6 +52,14 @@ impl Playlist {
 
     pub fn youtube_id(&self) -> Option<&str> {
         self.youtube_id.as_deref()
+    }
+
+    pub fn set_nesting_mode(&mut self, _nesting_mode: NestingMode) {
+        todo!()
+    }
+
+    pub fn nesting_mode(&self) -> NestingMode {
+        NestingMode::Flatten // TODO
     }
 }
 
@@ -89,11 +103,13 @@ impl Playlist {
                 .await?
             } else {
                 // language=SQL
-                let row = sqlx::query!("SELECT modified FROM playlist WHERE id = $1", save.id())
-                    .fetch_one(&mut *db)
-                    .await?;
+                let old_modified =
+                    sqlx::query!("SELECT modified FROM playlist WHERE id = $1", save.id())
+                        .fetch_one(&mut *db)
+                        .await?
+                        .modified;
 
-                match (save.header().modified_at(), row.modified) {
+                match (save.header().modified_at(), old_modified) {
                     (Some(my_mtime), Some(db_mtime)) => {
                         if db_mtime > my_mtime {
                             return Err(objgen::Error::OutdatedState(db_mtime));

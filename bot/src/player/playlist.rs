@@ -1,25 +1,24 @@
-use futures::future::BoxFuture;
-use futures::{FutureExt, TryStreamExt};
 use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::db::entity;
 use crate::player::Track;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone)]
 pub struct Playlist {
-    persistent_id: Option<Uuid>,
-    title: String,
-    entries: Vec<PlaylistLike>,
+    playlist: entity::Playlist,
     playlist_mode: PlaylistMode,
     shuffle: bool,
     last_played: Vec<usize>,
+    tracker: Tracker,
 }
 
 #[derive(Debug, Clone)]
-pub enum PlaylistLike {
-    Track(Track),
-    Playlist(Playlist),
+struct Tracker {
+    entries: Vec<Tracker>,
+    last_played: Vec<usize>,
 }
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -49,81 +48,46 @@ struct SubOrderTracker<P> {
 impl Playlist {
     pub fn new() -> Self {
         Playlist {
-            persistent_id: None,
-            title: "Playlist".to_string(),
-            entries: vec![],
+            playlist: entity::Playlist::new(),
             playlist_mode: PlaylistMode::Flatten,
             shuffle: false,
             last_played: vec![],
+            tracker: Tracker::new(),
         }
     }
 
-    pub fn load(uuid: Uuid, db: &PgPool) -> BoxFuture<sqlx::Result<Self>> {
-        async move {
-            let row = sqlx::query!("SELECT title FROM playlist WHERE id = $1", uuid)
-                .fetch_one(db)
-                .await?;
-
-            let db_entries: Vec<_> = sqlx::query!(
-                "SELECT id, track, sub_playlist FROM playlist_entry \
-                 WHERE playlist = $1 \
-                 ORDER BY index",
-                uuid
-            )
-            .fetch(db)
-            .try_collect()
-            .await?;
-
-            let mut entries = Vec::new();
-
-            for el in db_entries {
-                let entry = match (el.track, el.sub_playlist) {
-                    (Some(track), None) => PlaylistLike::Track(Track::load(track, db).await?),
-                    (None, Some(sub_playlist)) => {
-                        PlaylistLike::Playlist(Playlist::load(sub_playlist, db).await?)
-                    }
-                    (_, _) => unreachable!(),
-                };
-                entries.push(entry);
-            }
-
-            Ok(Playlist {
-                persistent_id: Some(uuid),
-                title: row.title,
-                entries,
-                playlist_mode: PlaylistMode::Flatten,
-                shuffle: false,
-                last_played: vec![],
-            })
-        }
-        .boxed()
+    pub async fn load(uuid: Uuid, db: &PgPool) -> sqlx::Result<Self> {
+        let playlist = entity::Playlist::load(uuid, &mut *db.acquire().await?).await?;
+        Ok(Playlist {
+            playlist,
+            playlist_mode: PlaylistMode::Flatten,
+            shuffle: false,
+            last_played: vec![],
+            tracker: Tracker::new()
+        })
     }
 
     pub fn id(&self) -> Option<Uuid> {
-        self.persistent_id
+        self.playlist.object().id()
     }
 
     pub fn title(&self) -> &str {
-        &self.title
+        &self.playlist.object().title()
     }
 
     pub fn set_title<S>(&mut self, title: S)
     where
         S: Into<String>,
     {
-        self.title = title.into();
+        self.playlist.set_title(title);
     }
 
     pub fn entries(&self) -> &[PlaylistLike] {
         &self.entries
     }
 
-    fn add(&mut self, entry: PlaylistLike) {
-        self.entries.push(entry);
-    }
-
     pub fn add_track(&mut self, track: Track) {
-        self.add(PlaylistLike::Track(track));
+        self.playlist.push_track(track);
     }
 
     pub fn add_playlist(&mut self, playlist: Playlist) {
@@ -227,6 +191,15 @@ impl Playlist {
             self.last_played[i] = idx;
         } else {
             self.last_played.push(idx);
+        }
+    }
+}
+
+impl Tracker {
+    pub fn new() -> Self {
+        Tracker {
+            entries: Vec::new(),
+            last_played: Vec::new(),
         }
     }
 }
@@ -359,7 +332,7 @@ fn add_last(vec: &mut Vec<usize>, idx: usize) {
 
 #[cfg(test)]
 mod test {
-    use super::{add_last, select_next, Playlist, PlaylistLike, PlaylistMode, Track};
+    use super::{add_last, select_next, Playlist, PlaylistMode, Track};
 
     #[test]
     fn test_random_dist() {

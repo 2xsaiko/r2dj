@@ -26,13 +26,13 @@ pub struct ObjectHeader {
 impl ObjectHeader {
     pub fn from_loaded(
         id: Uuid,
-        created_at: DateTime<Utc>,
+        created_at: Option<DateTime<Utc>>,
         modified_at: Option<DateTime<Utc>>,
     ) -> Self {
         ObjectHeader {
             id: Some(id),
             modified: false,
-            created_at: Some(created_at),
+            created_at,
             modified_at,
         }
     }
@@ -174,6 +174,26 @@ macro_rules! impl_object {
         #[allow(unused)]
         pub fn modified_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
             self.header.modified_at()
+        }
+    };
+}
+
+macro_rules! check_out_of_date {
+    ($table:ident, $save:expr, $db:expr) => {
+        // language=SQL
+        let old_modified =
+            sqlx::query!(concat!("SELECT modified FROM ", stringify!($table), " WHERE id = $1"), save.id())
+                .fetch_one(&mut *$db)
+                .await?
+                .modified;
+
+        match ($save.header().modified_at(), old_modified) {
+            (Some(my_mtime), Some(db_mtime)) => {
+                if db_mtime > my_mtime {
+                    return Err(objgen::Error::OutdatedState(db_mtime));
+                }
+            }
+            _ => {}
         }
     };
 }

@@ -1,23 +1,25 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
+use log::debug;
 use log::error;
+use petgraph::graph::NodeIndex;
 use pin_project_lite::pin_project;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::Duration;
 use uuid::Uuid;
 
+use audiopipe::{AudioSource, Core};
 use player2x::ffplayer::{Player, PlayerEvent};
-pub use playlist::*;
+pub use playlistv2::*;
 
-use crate::player::track::Track;
-use audiopipe::aaaaaaa::{AudioSource, Core};
-use petgraph::graph::NodeIndex;
-use std::sync::{Arc, Mutex};
+use crate::db::entity::{Playlist, Track};
 
 pub mod import;
-mod playlist;
+// mod playlist;
+mod playlistv2;
 mod track;
 
 pub struct Room {
@@ -29,7 +31,7 @@ pub struct Room {
 }
 
 struct RoomService {
-    player: Option<Player<AudioSource<2>>>,
+    player: Option<Player<AudioSource>>,
     player_receiver: Option<broadcast::Receiver<PlayerEvent>>,
     audio_out: NodeIndex,
     ac: Arc<Core>,
@@ -37,9 +39,15 @@ struct RoomService {
     shared: Arc<Mutex<Shared>>,
 }
 
+pub enum PlayMode {
+    Once,
+    Repeat,
+    RepeatOne,
+}
+
 struct Shared {
     mode: PlayMode,
-    playlist: Playlist,
+    playlist: PlaylistTracker,
     track_state: Option<TrackState>,
 }
 
@@ -58,7 +66,7 @@ impl Room {
 
         let shared = Arc::new(Mutex::new(Shared {
             mode: PlayMode::Repeat,
-            playlist: Playlist::new(),
+            playlist: PlaylistTracker::new(Playlist::new()),
             track_state: None,
         }));
 
@@ -102,11 +110,11 @@ impl Room {
         self.tx.send(Message::Queue(track)).await.unwrap();
     }
 
-    pub async fn set_playlist(&self, playlist: Playlist) {
+    pub async fn set_playlist(&self, playlist: PlaylistTracker) {
         self.tx.send(Message::SetPlaylist(playlist)).await.unwrap();
     }
 
-    pub fn playlist(&self) -> Playlist {
+    pub fn playlist(&self) -> PlaylistTracker {
         self.shared.lock().unwrap().playlist.clone()
     }
 
@@ -120,13 +128,20 @@ impl Room {
 }
 
 impl RoomService {
-    fn get_next(&mut self) -> Option<Track> {
+    fn get_next(&self) -> Option<Track> {
         // TODO song queuing
-        self.shared.lock().unwrap().playlist.next()
+        self.shared
+            .lock()
+            .unwrap()
+            .playlist
+            .next()
+            .map(|x| x.clone())
+            .ok()
     }
 
     async fn skip(&mut self) {
         let playing = if let Some(player) = self.player.take() {
+            // TODO: remove audio output from ac
             let p = player.is_playing().await;
             player.pause().await;
             p
@@ -169,6 +184,8 @@ async fn run_room(mut data: RoomService, mut rx: mpsc::Receiver<Message>) {
                     Some(msg) => msg,
                 };
 
+                debug!("{:?}", msg);
+
                 match msg {
                     Message::Play => {
                         match &data.player {
@@ -194,6 +211,8 @@ async fn run_room(mut data: RoomService, mut rx: mpsc::Receiver<Message>) {
                 }
             }
             ev = player_fut => {
+                debug!("{:?}", ev);
+
                 match ev {
                     Ok(ev) => {
                         match ev {
@@ -231,7 +250,7 @@ enum Message {
     Pause,
     Next,
     Queue(Track),
-    SetPlaylist(Playlist),
+    SetPlaylist(PlaylistTracker),
 }
 
 #[derive(Debug, Clone)]

@@ -3,7 +3,8 @@ use std::fmt::Write;
 
 use clap::{App, AppSettings, Arg};
 
-use crate::player::{Playlist, PlaylistLike};
+use crate::db::entity::{playlist, Playlist};
+use crate::player::PlaylistTracker;
 use crate::Bot;
 
 const COMMAND_PREFIX: char = ';';
@@ -113,36 +114,37 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
 
     let mut message = String::new();
 
-    if let Some(id) = pl.id() {
-        writeln!(message, "{} ({})", pl.title(), id).unwrap();
+    if let Some(id) = pl.playlist().object().id() {
+        writeln!(message, "{} ({})", pl.playlist().object().title(), id).unwrap();
     } else {
-        writeln!(message, "{}", pl.title()).unwrap();
+        writeln!(message, "{}", pl.playlist().object().title()).unwrap();
     }
 
     writeln!(message, "<table><tr><th><u>P</u>os</th><th><u>T</u>itle</th><th><u>A</u>rtist</th><th>A<u>l</u>bum</th></tr>").unwrap();
     writeln!(message, "<tr><th></th><th></th><th>Shuffle</th></tr>").unwrap();
 
-    for (idx, entry) in pl.entries().iter().enumerate() {
-        match entry {
-            PlaylistLike::Track(tr) => {
+    for (idx, entry) in pl.playlist().entries().iter().enumerate() {
+        match entry.content() {
+            playlist::Content::Track(tr) => {
                 let (artist, album) = ("", ""); // TODO
                 writeln!(
                     message,
                     "<tr><td align=\"right\">{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                     idx,
-                    tr.title().unwrap_or(""),
+                    tr.object().title().unwrap_or(""),
                     artist,
                     album
                 )
                 .unwrap();
             }
-            PlaylistLike::Playlist(pl) => {
+            playlist::Content::Playlist(pl) => {
                 writeln!(
                     message,
                     "<tr><td align=\"right\">{}</td><td>{}</td><td>{}</td></tr>",
                     idx,
-                    entry.title().unwrap_or(""),
-                    if pl.shuffle() { "yes" } else { "no" },
+                    pl.object().title(),
+                    //if pl.shuffle() { "yes" } else { "no" },
+                    "no",
                 )
                 .unwrap();
             }
@@ -179,12 +181,22 @@ async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         playlist.set_title(name);
     }
 
-    bot.room.set_playlist(playlist).await;
+    bot.room.set_playlist(PlaylistTracker::new(playlist)).await;
 }
 
 async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
     let matches = app_for_command("newsub")
         .about("Attach a new sub-playlist")
+        .args(&[
+            Arg::new("path")
+                .short('p')
+                .value_name("PATH")
+                .default_value("-")
+                .about("The path to the playlist the new one should be attached to"),
+            Arg::new("name")
+                .value_name("NAME")
+                .about("Specify the name of the new playlist")
+        ])
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 

@@ -6,17 +6,18 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use log::{info, LevelFilter};
+use log::{debug, info, LevelFilter};
 use simplelog::{Config, TerminalMode};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::ConnectOptions;
 use tokio::time::interval;
 use uuid::Uuid;
 
-use audiopipe::aaaaaaa::Core;
+use audiopipe::Core;
 use mumble::{MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
 
+use crate::db::entity;
 use crate::player::{Event as RoomEvent, Room};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
@@ -58,7 +59,15 @@ async fn main() {
         .unwrap();
 
     let id = Uuid::from_str("99b071f7-bdae-48b4-9c0a-aac91332c348").unwrap();
-    let pl = player::Playlist::load(id, &pool).await.unwrap();
+    let pl = entity::Playlist::load(id, &mut pool.acquire().await.unwrap())
+        .await
+        .unwrap();
+    let pl = player::PlaylistTracker::new(pl);
+    let pl1 = db::entity::playlist::Playlist::load(id, &mut *pool.acquire().await.unwrap())
+        .await
+        .unwrap();
+
+    println!("{:#?}", pl1);
 
     let mumble_config = MumbleConfig {
         username: config.name.clone(),
@@ -102,6 +111,8 @@ async fn main() {
                     Err(_) => break,
                 };
 
+                debug!("{:?}", ev);
+
                 match ev {
                     mumble::Event::Message(ev) => commands::handle_message_event(&bot, &ev).await,
                     _ => {}
@@ -112,6 +123,8 @@ async fn main() {
                     Ok(ev) => ev,
                     Err(_) => break,
                 };
+
+                debug!("{:?}", ev);
 
                 match ev {
                     RoomEvent::PlayerEvent(p) => {
@@ -129,13 +142,15 @@ async fn main() {
                         }
                     }
                     RoomEvent::TrackChanged(t, len) => {
-                        rst.title = t.title().unwrap_or("Unnamed Track").to_string();
+                        rst.title = t.object().title().unwrap_or("Unnamed Track").to_string();
                         rst.total_duration = len;
+                        rst.position = Duration::ZERO;
                         update_status(&bot.client, &mut prev_rst, &rst).await;
                     }
                     RoomEvent::TrackCleared => {
                         rst.title = "(none)".to_string();
                         rst.total_duration = Duration::ZERO;
+                        rst.position = Duration::ZERO;
                         update_status(&bot.client, &mut prev_rst, &rst).await;
                     }
                 }
