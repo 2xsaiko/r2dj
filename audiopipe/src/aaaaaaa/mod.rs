@@ -11,13 +11,13 @@ use dasp::ring_buffer::Bounded;
 use dasp::sample::Duplex;
 use dasp::signal::interpolate::Converter;
 use dasp::{Frame, Signal};
-use dasp_graph::{process, BoxedNode, BoxedNodeSend, Buffer, Input, NodeData};
-use log::warn;
+use dasp_graph::{process, BoxedNodeSend, Buffer, Input, NodeData};
+use futures::Sink;
+use log::{debug, warn};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 
 use crate::streamio::StreamWrite;
-use futures::Sink;
 
 pub struct Tap<S> {
     running: bool,
@@ -136,14 +136,14 @@ impl CoreData {
         ))
     }
 
-    fn add_input_to<const CHANNELS: usize>(
+    fn add_input_to(
         &mut self,
         output: Option<NodeIndex>,
-    ) -> AudioSource<CHANNELS> {
+    ) -> AudioSource {
         let shared = Arc::new(AudioSourceShared {
             running: AtomicBool::new(false),
             data: Mutex::new(AudioSourceShared1 {
-                buffer: Bounded::from(vec![[0.0; CHANNELS]; 512]),
+                buffer: Bounded::from(vec![[0.0; 2]; 512]),
                 write_waker: None,
             }),
         });
@@ -153,9 +153,9 @@ impl CoreData {
                 node: BoxedNodeSend::new(InputNode {
                     shared: shared.clone(),
                 }),
-                channels: CHANNELS as u8,
+                channels: 2u8,
             },
-            vec![Buffer::default(); CHANNELS],
+            vec![Buffer::default(); 2],
         ));
 
         if let Some(output) = output {
@@ -165,9 +165,9 @@ impl CoreData {
         AudioSource { shared, node }
     }
 
-    fn add_output<const CHANNELS: usize>(&mut self) -> OutputSignal<CHANNELS> {
+    fn add_output(&mut self) -> OutputSignal {
         let shared = Arc::new(Mutex::new(OutputNodeShared {
-            buffer: Bounded::from(vec![[0.0; CHANNELS]; 8192]),
+            buffer: Bounded::from(vec![[0.0; 2]; 8192]),
         }));
 
         let node = self.graph.add_node(NodeData::new(
@@ -175,9 +175,9 @@ impl CoreData {
                 node: BoxedNodeSend::new(OutputNode {
                     shared: shared.clone(),
                 }),
-                channels: CHANNELS as u8,
+                channels: 2u8,
             },
-            vec![Buffer::default(); CHANNELS],
+            vec![Buffer::default(); 2],
         ));
 
         self.graph.add_edge(node, self.bottom, ());
@@ -191,6 +191,8 @@ impl CoreData {
 
     fn tick(&mut self) {
         process(&mut self.processor, &mut self.graph, self.bottom);
+
+        debug!("{:?}", self.graph.raw_edges());
     }
 
     fn sinks(&self) -> impl Iterator<Item = NodeIndex> + '_ {
@@ -208,28 +210,25 @@ pub struct Core {
 impl Core {
     pub fn new(sample_rate: u32) -> Self {
         let data = Arc::new(Mutex::new(CoreData::new()));
-        let c = Core {
-            data,
-            sample_rate,
-        };
+        let c = Core { data, sample_rate };
         tokio::spawn(c.clone().run());
         c
     }
 
-    pub fn add_input<const CHANNELS: usize>(&self) -> AudioSource<CHANNELS> {
+    pub fn add_input(&self) -> AudioSource {
         let mut data = self.data.lock().unwrap();
         let out = data.default_output;
         data.add_input_to(out)
     }
 
-    pub fn add_input_to<const CHANNELS: usize>(
+    pub fn add_input_to(
         &self,
         output: Option<NodeIndex>,
-    ) -> AudioSource<CHANNELS> {
+    ) -> AudioSource {
         self.data.lock().unwrap().add_input_to(output)
     }
 
-    pub fn add_output<const CHANNELS: usize>(&self) -> OutputSignal<CHANNELS> {
+    pub fn add_output(&self) -> OutputSignal {
         self.data.lock().unwrap().add_output()
     }
 
@@ -247,25 +246,27 @@ impl Core {
     }
 }
 
+type SampleBuffer = Bounded<Vec<[f32; 2]>>;
+
 #[derive(Debug)]
-struct AudioSourceShared<const CHANNELS: usize> {
+struct AudioSourceShared {
     running: AtomicBool,
-    data: Mutex<AudioSourceShared1<CHANNELS>>,
+    data: Mutex<AudioSourceShared1>,
 }
 
 #[derive(Debug)]
-struct AudioSourceShared1<const CHANNELS: usize> {
-    buffer: Bounded<Vec<[f32; CHANNELS]>>,
+struct AudioSourceShared1 {
+    buffer: SampleBuffer,
     write_waker: Option<Waker>,
 }
 
 #[derive(Debug)]
-pub struct AudioSource<const CHANNELS: usize> {
-    shared: Arc<AudioSourceShared<CHANNELS>>,
+pub struct AudioSource {
+    shared: Arc<AudioSourceShared>,
     node: NodeIndex,
 }
 
-impl<const CHANNELS: usize> AudioSource<CHANNELS> {
+impl AudioSource {
     pub fn set_running(&self, running: bool) {
         self.shared.running.store(running, Ordering::Relaxed);
     }
@@ -274,7 +275,7 @@ impl<const CHANNELS: usize> AudioSource<CHANNELS> {
         self.shared.running.load(Ordering::Relaxed)
     }
 
-    pub fn push(&self, sample: [f32; CHANNELS]) -> Option<[f32; CHANNELS]> {
+    pub fn push(&self, sample: [f32; 2]) -> Option<[f32; 2]> {
         let mut data = self.shared.data.lock().unwrap();
         data.buffer.push(sample)
     }
@@ -284,11 +285,11 @@ impl<const CHANNELS: usize> AudioSource<CHANNELS> {
     }
 }
 
-impl<const CHANNELS: usize> StreamWrite<[f32; CHANNELS]> for AudioSource<CHANNELS> {
+impl StreamWrite<[f32; 2]> for AudioSource {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &[[f32; CHANNELS]],
+        buf: &[[f32; 2]],
     ) -> Poll<io::Result<usize>> {
         let mut data = self.shared.data.lock().unwrap();
 
@@ -315,7 +316,7 @@ impl<const CHANNELS: usize> StreamWrite<[f32; CHANNELS]> for AudioSource<CHANNEL
     }
 }
 
-impl<const CHANNELS: usize> Sink<[f32; CHANNELS]> for AudioSource<CHANNELS> {
+impl Sink<[f32; 2]> for AudioSource {
     type Error = ();
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -329,7 +330,7 @@ impl<const CHANNELS: usize> Sink<[f32; CHANNELS]> for AudioSource<CHANNELS> {
         }
     }
 
-    fn start_send(self: Pin<&mut Self>, item: [f32; CHANNELS]) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: [f32; 2]) -> Result<(), Self::Error> {
         let mut data = self.shared.data.lock().unwrap();
 
         data.buffer.push(item);
@@ -346,11 +347,11 @@ impl<const CHANNELS: usize> Sink<[f32; CHANNELS]> for AudioSource<CHANNELS> {
     }
 }
 
-struct InputNode<const CHANNELS: usize> {
-    shared: Arc<AudioSourceShared<CHANNELS>>,
+struct InputNode {
+    shared: Arc<AudioSourceShared>,
 }
 
-impl<const CHANNELS: usize> dasp_graph::Node for InputNode<CHANNELS> {
+impl dasp_graph::Node for InputNode {
     fn process(&mut self, _inputs: &[Input], output: &mut [Buffer]) {
         if self.shared.running.load(Ordering::Relaxed) {
             let mut data = self.shared.data.lock().unwrap();
@@ -360,12 +361,12 @@ impl<const CHANNELS: usize> dasp_graph::Node for InputNode<CHANNELS> {
                 let sample = match data.buffer.pop() {
                     None => {
                         underflow += 1;
-                        [0.0; CHANNELS]
+                        [0.0; 2]
                     }
                     Some(s) => s,
                 };
 
-                for ch in 0..CHANNELS {
+                for ch in 0..2 {
                     output[ch][i] = sample[ch];
                 }
             }
@@ -384,28 +385,28 @@ impl<const CHANNELS: usize> dasp_graph::Node for InputNode<CHANNELS> {
 }
 
 #[derive(Debug)]
-struct OutputNodeShared<const CHANNELS: usize> {
-    buffer: Bounded<Vec<[f32; CHANNELS]>>,
+struct OutputNodeShared {
+    buffer: Bounded<Vec<[f32; 2]>>,
 }
 
-struct OutputNode<const CHANNELS: usize> {
-    shared: Arc<Mutex<OutputNodeShared<CHANNELS>>>,
+struct OutputNode {
+    shared: Arc<Mutex<OutputNodeShared>>,
 }
 
 #[derive(Debug)]
-pub struct OutputSignal<const CHANNELS: usize> {
-    shared: Arc<Mutex<OutputNodeShared<CHANNELS>>>,
+pub struct OutputSignal {
+    shared: Arc<Mutex<OutputNodeShared>>,
     node: NodeIndex,
 }
 
-impl<const CHANNELS: usize> dasp_graph::Node for OutputNode<CHANNELS> {
+impl dasp_graph::Node for OutputNode {
     fn process(&mut self, inputs: &[Input], _output: &mut [Buffer]) {
         let mut shared = self.shared.lock().unwrap();
 
-        let mut output = [[0.0; CHANNELS]; Buffer::LEN];
+        let mut output = [[0.0; 2]; Buffer::LEN];
 
         for input in inputs.iter() {
-            assert_eq!(CHANNELS, input.buffers().len());
+            assert_eq!(2, input.buffers().len());
 
             for (ch, buffer) in input.buffers().iter().enumerate() {
                 for (idx, sample) in buffer.iter().enumerate() {
@@ -420,11 +421,11 @@ impl<const CHANNELS: usize> dasp_graph::Node for OutputNode<CHANNELS> {
     }
 }
 
-impl<const CHANNELS: usize> Signal for OutputSignal<CHANNELS>
+impl Signal for OutputSignal
 where
-    [f32; CHANNELS]: Frame,
+    [f32; 2]: Frame,
 {
-    type Frame = [f32; CHANNELS];
+    type Frame = [f32; 2];
 
     fn next(&mut self) -> Self::Frame {
         let mut shared = self.shared.lock().unwrap();
@@ -432,7 +433,7 @@ where
     }
 }
 
-impl<const CHANNELS: usize> OutputSignal<CHANNELS> {
+impl OutputSignal {
     pub fn node(&self) -> NodeIndex {
         self.node
     }
