@@ -127,8 +127,6 @@ impl CoreData {
 
     fn tick(&mut self) {
         process(&mut self.processor, &mut self.graph, self.bottom);
-
-        debug!("{:?}", self.graph.raw_edges());
     }
 
     fn sinks(&self) -> impl Iterator<Item = NodeIndex> + '_ {
