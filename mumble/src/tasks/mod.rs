@@ -16,8 +16,7 @@ use tokio::sync::{broadcast, mpsc, watch, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-use audiopipe::aaaaaaa::{Core, OutputSignal};
-use audiopipe::mixer::{new_mixer, MixerInput, MixerOutput};
+use audiopipe::{Core, OutputSignal};
 use encoder::encoder;
 
 use crate::event::{Event, Message};
@@ -52,7 +51,7 @@ pub struct Connectors {
 
     // Private stuff
     cp_rx: Arc<AsyncMutex<mpsc::Receiver<ControlPacket<Serverbound>>>>,
-    m_out: Arc<AsyncMutex<OutputSignal<2>>>,
+    m_out: Arc<AsyncMutex<OutputSignal>>,
 }
 
 impl Connectors {
@@ -341,7 +340,10 @@ fn handle_user_state(is: &InternalState, msg: msgs::UserState) {
 }
 
 fn handle_user_remove(is: &InternalState, msg: msgs::UserRemove) {
-    is.server_state.lock().unwrap().remove_user(msg.get_session());
+    is.server_state
+        .lock()
+        .unwrap()
+        .remove_user(msg.get_session());
 }
 
 fn handle_channel_state(is: &InternalState, msg: msgs::ChannelState) {

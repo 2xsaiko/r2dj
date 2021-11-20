@@ -12,20 +12,18 @@ use std::time::{Duration, Instant};
 use dasp::{Frame, Sample};
 use futures::future::BoxFuture;
 use futures::{FutureExt, Sink, SinkExt};
+use log::debug;
 use log::error;
-use pin_project_lite::pin_project;
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio::io::AsyncReadExt;
 use tokio::process::{ChildStdout, Command};
 use tokio::select;
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use audiopipe::aaaaaaa::AudioSource;
-use audiopipe::mixerv2::AudioFormat;
-use audiopipe::streamio::{StreamWrite, StreamWriteExt};
+use audiopipe::AudioSource;
 
-use crate::ffmpeg::{ffpipe, FfmpegConfig, Format, PathSource, PipeDest, TranscoderOutput};
+use crate::ffmpeg::{ffpipe, FfmpegConfig, Format, PathSource, TranscoderOutput};
 use crate::ffprobe;
 
 // TODO replace with Duration::ZERO
@@ -55,8 +53,8 @@ struct PlayingTracker {
     tx: oneshot::Sender<()>,
 }
 
-impl Player<AudioSource<2>> {
-    pub fn new<P: Into<PathBuf>>(path: P, pipe: AudioSource<2>) -> Result<Self> {
+impl Player<AudioSource> {
+    pub fn new<P: Into<PathBuf>>(path: P, pipe: AudioSource) -> Result<Self> {
         let path = path.into();
         let info = ffprobe::ffprobe(&path)?;
 
@@ -110,7 +108,7 @@ impl Player<AudioSource<2>> {
     }
 }
 
-impl Player<AudioSource<2>> {
+impl Player<AudioSource> {
     pub async fn play(&self) {
         let mut state = self.state.lock().await;
 
@@ -130,8 +128,11 @@ impl Player<AudioSource<2>> {
 
         let task = tokio::spawn(async move {
             let pipe = pipe;
+            debug!("1");
             let mut pipe = pipe.lock().await;
+            debug!("2");
             pipe.set_running(true);
+            debug!("3");
 
             let _ = sender.send(PlayerEvent::Playing {
                 now: Instant::now(),
