@@ -6,10 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use dasp::interpolate::linear::Linear;
 use dasp::ring_buffer::Bounded;
-use dasp::sample::Duplex;
-use dasp::signal::interpolate::Converter;
 use dasp::{Frame, Signal};
 use dasp_graph::{process, BoxedNodeSend, Buffer, Input, NodeData};
 use futures::Sink;
@@ -18,67 +15,6 @@ use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 
 use crate::streamio::StreamWrite;
-
-pub struct Tap<S> {
-    running: bool,
-    signal: S,
-}
-
-impl<S> Signal for Tap<S>
-where
-    S: Signal,
-{
-    type Frame = S::Frame;
-
-    fn next(&mut self) -> Self::Frame {
-        if self.running {
-            self.signal.next()
-        } else {
-            Self::Frame::EQUILIBRIUM
-        }
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.signal.is_exhausted()
-    }
-}
-
-impl<S> Tap<S> {
-    pub fn into_inner(self) -> S {
-        self.signal
-    }
-
-    pub fn is_running(&self) -> bool {
-        self.running
-    }
-
-    pub fn set_running(&mut self, running: bool) {
-        self.running = running;
-    }
-}
-
-pub struct Limiter<S> {
-    signal: S,
-    rate: u32,
-}
-
-impl<S, T> Limiter<S>
-where
-    S: Signal,
-    S::Frame: Frame<Sample = T>,
-    T: Duplex<f64>,
-{
-    pub fn resample(mut self, rate: u32) -> Limiter<Converter<S, Linear<S::Frame>>> {
-        let s1 = self.signal.next();
-        let s2 = self.signal.next();
-        Limiter {
-            signal: self
-                .signal
-                .from_hz_to_hz(Linear::new(s1, s2), self.rate as f64, rate as f64),
-            rate,
-        }
-    }
-}
 
 // Choose a type of graph for audio processing.
 type Graph = petgraph::graph::DiGraph<NodeData<Node>, (), u32>;
@@ -127,8 +63,8 @@ impl CoreData {
     }
 
     fn add_node<N>(&mut self, node: NodeData<N>) -> NodeIndex
-    where
-        N: dasp_graph::Node + Send + 'static,
+        where
+            N: dasp_graph::Node + Send + 'static,
     {
         self.graph.add_node(NodeData::new(
             Node::Boxed(BoxedNodeSend::new(node.node)),
@@ -422,8 +358,8 @@ impl dasp_graph::Node for OutputNode {
 }
 
 impl Signal for OutputSignal
-where
-    [f32; 2]: Frame,
+    where
+        [f32; 2]: Frame,
 {
     type Frame = [f32; 2];
 

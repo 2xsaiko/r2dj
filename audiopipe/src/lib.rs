@@ -1,9 +1,8 @@
-pub mod streamio;
-pub mod aaaaaaa;
+pub use crate::core::{AudioSource, Core, OutputSignal};
 
-fn slice_to_u8(slice: &[i16]) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, slice.len() * 2) }
-}
+pub mod core;
+pub mod extra;
+pub mod streamio;
 
 #[cfg(test)]
 mod tests {
