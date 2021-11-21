@@ -3,15 +3,16 @@ use std::collections::HashMap;
 use log::debug;
 
 use crate::db::entity::playlist::Content;
-use crate::db::entity::{Playlist, Track};
+use crate::db::entity::{LPlaylist, Track};
 use crate::db::object::playlist::NestingMode;
+use crate::entity::Playlist;
 use crate::player::playlistv2::treepath::{TreePath, TreePathBuf};
 
 pub mod treepath;
 
 #[derive(Debug, Clone)]
 pub struct PlaylistTracker {
-    playlist: Playlist,
+    playlist: LPlaylist,
     trackers: HashMap<TreePathBuf, Vec<(u16, TreePathBuf)>>,
     iteration: u16,
 }
@@ -23,7 +24,7 @@ pub enum GetTrackError {
 }
 
 impl PlaylistTracker {
-    pub fn new(playlist: Playlist) -> Self {
+    pub fn new(playlist: LPlaylist) -> Self {
         PlaylistTracker {
             playlist,
             trackers: HashMap::new(),

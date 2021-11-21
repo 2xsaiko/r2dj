@@ -24,6 +24,7 @@ const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 mod comms;
+mod containers;
 
 mod commands;
 mod config;
@@ -61,15 +62,11 @@ async fn main() {
         .unwrap();
 
     let id = Uuid::from_str("99b071f7-bdae-48b4-9c0a-aac91332c348").unwrap();
-    let pl = entity::Playlist::load(id, &mut pool.acquire().await.unwrap())
-        .await
-        .unwrap();
-    let pl = player::PlaylistTracker::new(pl);
-    let pl1 = db::entity::playlist::Playlist::load(id, &mut *pool.acquire().await.unwrap())
+    let pl = entity::LPlaylist::load(id, &mut pool.acquire().await.unwrap())
         .await
         .unwrap();
 
-    println!("{:#?}", pl1);
+    println!("{:#?}", pl);
 
     let mumble_config = MumbleConfig {
         username: config.name.clone(),

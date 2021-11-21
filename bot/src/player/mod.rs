@@ -1,21 +1,22 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+
 use futures::StreamExt;
 use log::debug;
 use log::error;
 use petgraph::graph::NodeIndex;
 use pin_project_lite::pin_project;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tokio::time::Duration;
 use uuid::Uuid;
 
 use audiopipe::{AudioSource, Core};
 use player2x::ffplayer::{Player, PlayerEvent};
 pub use playlistv2::*;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
 
-use crate::db::entity::{Playlist, Track};
+use crate::db::entity::{Playlist, LPlaylist, Track};
 use crate::proxy;
 
 pub mod import;
@@ -29,9 +30,9 @@ proxy! {
         pub async fn pause();
         pub async fn next();
         pub async fn add_to_queue(track: Track);
-        pub async fn set_playlist(tracker: PlaylistTracker);
-        // pub async fn playlist() -> PlaylistTracker;
-        // pub async fn add_playlist(playlist: Playlist);
+        pub async fn set_playlist(playlist: LPlaylist);
+        pub async fn playlist() -> LPlaylist;
+        pub async fn add_playlist(playlist: LPlaylist);
     }
 }
 
@@ -79,7 +80,7 @@ impl Room {
 
         let shared = Arc::new(Mutex::new(Shared {
             mode: PlayMode::Repeat,
-            playlist: PlaylistTracker::new(Playlist::new()),
+            playlist: PlaylistTracker::new(LPlaylist::new()),
             track_state: None,
         }));
 
@@ -189,21 +190,33 @@ async fn run_room(mut data: RoomService, mut rx: Room1Receiver) {
                             None => data.skip().await,
                             Some(pl) => pl.play().await,
                         }
+
+                        let _ = callback.send(());
                     }
-                    Room1Message::Pause  { callback } => {
+                    Room1Message::Pause { callback } => {
                         if let Some(player) = &data.player {
                             player.pause().await;
                         }
+
+                        let _ = callback.send(());
                     }
-                    Room1Message::Next  { callback }=> {
+                    Room1Message::Next { callback }=> {
                         data.skip().await;
+                        let _ = callback.send(());
                     }
                     Room1Message::AddToQueue { track, callback } => {
                         todo!()
                     }
-                    Room1Message::SetPlaylist{ tracker, callback } => {
-                        data.shared.lock().unwrap().playlist = tracker;
+                    Room1Message::SetPlaylist { playlist, callback } => {
+                        data.shared.lock().unwrap().playlist = PlaylistTracker::new(playlist);
                         data.skip().await;
+                        let _ = callback.send(());
+                    }
+                    Room1Message::Playlist { callback } => {
+                        todo!()
+                    }
+                    Room1Message::AddPlaylist { playlist, callback } => {
+                        let _ = callback.send(());
                     }
                 }
             }

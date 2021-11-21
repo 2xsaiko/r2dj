@@ -1,10 +1,14 @@
+use std::future::Future;
+
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use sqlx::postgres::PgQueryResult;
 use sqlx::{Acquire, PgConnection};
 use uuid::Uuid;
 
+use crate::containers::Container;
 use crate::db::{entity, object, objgen};
+use crate::declare_container;
 use crate::player::treepath::TreePath;
 
 #[derive(Debug, Clone)]
@@ -31,6 +35,18 @@ impl Playlist {
             Ok(playlist)
         }
         .boxed()
+    }
+}
+
+declare_container! {
+    pub type LPlaylist = Container<Playlist> {
+        pub fn new() -> Self;
+    }
+}
+
+impl LPlaylist {
+    pub fn load(id: Uuid, db: &mut PgConnection) -> impl Future<Output = sqlx::Result<Self>> + '_ {
+        Playlist::load(id, db).map(|res| res.map(|c| Container::wrap(c)))
     }
 }
 
@@ -93,7 +109,7 @@ impl Playlist {
     pub fn get_track(&self, path: impl AsRef<TreePath>) -> Option<&entity::Track> {
         match self.get_entry(path) {
             Some(Content::Track(t)) => Some(t),
-            _ => None
+            _ => None,
         }
     }
 }

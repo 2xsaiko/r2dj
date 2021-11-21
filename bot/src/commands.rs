@@ -3,8 +3,7 @@ use std::fmt::Write;
 
 use clap::{App, AppSettings, Arg};
 
-use crate::db::entity::{playlist, Playlist};
-use crate::player::PlaylistTracker;
+use crate::db::entity::{playlist, LPlaylist, Playlist};
 use crate::Bot;
 
 const COMMAND_PREFIX: char = ';';
@@ -70,7 +69,7 @@ async fn skip(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    bot.room.proxy().next().await;
+    let _ = bot.room.proxy().next().await;
 }
 
 async fn pause(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -79,7 +78,7 @@ async fn pause(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    bot.room.proxy().pause().await;
+    let _ = bot.room.proxy().pause().await;
 }
 
 async fn play(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -88,7 +87,7 @@ async fn play(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    bot.room.proxy().play().await;
+    let _ = bot.room.proxy().play().await;
 }
 
 async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -175,13 +174,17 @@ async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    let mut playlist = Playlist::new();
+    let mut playlist = LPlaylist::new();
 
     if let Some(name) = matches.value_of("name") {
         playlist.set_title(name);
     }
 
-    bot.room.proxy().set_playlist(PlaylistTracker::new(playlist)).await;
+    let _ = bot
+        .room
+        .proxy()
+        .set_playlist(playlist)
+        .await;
 }
 
 async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -195,7 +198,7 @@ async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
                 .about("The path to the playlist the new one should be attached to"),
             Arg::new("name")
                 .value_name("NAME")
-                .about("Specify the name of the new playlist")
+                .about("Specify the name of the new playlist"),
         ])
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
