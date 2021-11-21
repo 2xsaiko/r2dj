@@ -1,7 +1,9 @@
-pub mod autocow;
-pub mod proxy;
+#[doc(hidden)]
+pub use ::futures;
+#[doc(hidden)]
+pub use ::paste;
 
 pub use autocow::Ac;
 
-#[doc(hidden)]
-pub use ::futures;
+pub mod autocow;
+pub mod proxy;

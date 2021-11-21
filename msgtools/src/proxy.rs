@@ -11,7 +11,7 @@ macro_rules! proxy {
             )*
         }
     ) => {
-        paste::paste! {
+        $crate::paste::paste! {
             $v struct $name {
                 pipe: std::sync::Mutex<$crate::futures::channel::mpsc::Sender< [<$name Message>] >>
             }
@@ -35,7 +35,7 @@ macro_rules! proxy {
                 $fv async fn $fn_name (&self, $($p : $pty),* ) -> $crate::proxy::Result $(< $rty >)? {
                     let (c, h) = $crate::futures::channel::oneshot::channel();
 
-                    paste::paste! {
+                    $crate::paste::paste! {
                         let msg = [<$name Message>] :: [< $fn_name:camel >] {
                             $($p,)*
                             callback: c.into()
@@ -49,7 +49,7 @@ macro_rules! proxy {
             )*
         }
 
-        paste::paste! {
+        $crate::paste::paste! {
             type [<$name Receiver>] = $crate::futures::channel::mpsc::Receiver< [<$name Message>] >;
 
             #[derive(Debug)]
