@@ -12,9 +12,8 @@ macro_rules! proxy {
         }
     ) => {
         paste::paste! {
-            #[derive(Clone)]
             $v struct $name {
-                pipe: futures::channel::mpsc::Sender< [<$name Messages>] >
+                pipe: std::sync::Mutex<futures::channel::mpsc::Sender< [<$name Message>] >>
             }
 
             impl $name {
@@ -23,7 +22,7 @@ macro_rules! proxy {
                     let (tx, rx) = futures::channel::mpsc::channel(20);
 
                     (
-                        $name { pipe: tx },
+                        $name { pipe: std::sync::Mutex::new(tx) },
                         rx
                     )
                 }
@@ -33,17 +32,17 @@ macro_rules! proxy {
         impl $name {
             $(
                 #[allow(unused)]
-                $fv async fn $fn_name (&mut self, $($p : $pty),* ) -> $crate::comms::Result $(< $rty >)? {
+                $fv async fn $fn_name (&self, $($p : $pty),* ) -> $crate::comms::Result $(< $rty >)? {
                     let (c, h) = futures::channel::oneshot::channel();
 
                     paste::paste! {
-                        let msg = [<$name Messages>] :: [< $fn_name:camel >] {
+                        let msg = [<$name Message>] :: [< $fn_name:camel >] {
                             $($p,)*
                             callback: c.into()
                         };
                     }
 
-                    futures::SinkExt::send(&mut self.pipe, msg).await?;
+                    futures::SinkExt::send(&mut *self.pipe.lock().unwrap(), msg).await?;
 
                     Ok(h.await?)
                 }
@@ -51,10 +50,11 @@ macro_rules! proxy {
         }
 
         paste::paste! {
-            type [<$name Receiver>] = futures::channel::mpsc::Receiver< [<$name Messages>] >;
+            type [<$name Receiver>] = futures::channel::mpsc::Receiver< [<$name Message>] >;
 
+            #[derive(Debug)]
             #[allow(unused)]
-            $v enum [<$name Messages>] {
+            $v enum [<$name Message>] {
                 $( [< $fn_name:camel >] { $($p : $pty,)* callback: $crate::comms::Callback $( < $rty > )? } ),*
             }
         }
@@ -64,6 +64,7 @@ macro_rules! proxy {
 pub type Result<T = (), E = Error> = std::result::Result<T, E>;
 
 pin_project! {
+    #[derive(Debug)]
     #[must_use = "this callback must be used to return a value to the caller"]
     pub struct Callback<T = ()> {
         #[pin]
@@ -108,11 +109,11 @@ mod test {
 
         while let Some(v) = rx.next().await {
             match v {
-                TestMessages::Hello { name, callback } => {
+                TestMessage::Hello { name, callback } => {
                     let result = format!("Hello, {}!", name);
                     let _ = callback.send(result);
                 }
-                TestMessages::Yeah { callback } => {
+                TestMessage::Yeah { callback } => {
                     let _ = callback.send(state);
                     state = !state;
                 }

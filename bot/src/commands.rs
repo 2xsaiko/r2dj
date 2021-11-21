@@ -70,7 +70,7 @@ async fn skip(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    bot.room.next().await;
+    bot.room.proxy().next().await;
 }
 
 async fn pause(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -79,7 +79,7 @@ async fn pause(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    bot.room.pause().await;
+    bot.room.proxy().pause().await;
 }
 
 async fn play(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -88,7 +88,7 @@ async fn play(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    bot.room.play().await;
+    bot.room.proxy().play().await;
 }
 
 async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -181,7 +181,7 @@ async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         playlist.set_title(name);
     }
 
-    bot.room.set_playlist(PlaylistTracker::new(playlist)).await;
+    bot.room.proxy().set_playlist(PlaylistTracker::new(playlist)).await;
 }
 
 async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {

@@ -91,7 +91,7 @@ async fn main() {
 
     let room = Room::new(client.audio_input(), ac);
     let mut room_events = room.subscribe();
-    room.set_playlist(pl).await;
+    let _ = room.proxy().set_playlist(pl).await;
 
     let mut prev_rst = RoomStatus::default();
     let mut rst = RoomStatus::default();
