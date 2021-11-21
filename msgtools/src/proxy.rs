@@ -17,7 +17,6 @@ macro_rules! proxy {
             }
 
             impl $name {
-                #[allow(unused)]
                 $v fn channel() -> ($name, [<$name Receiver>]) {
                     let (tx, rx) = $crate::futures::channel::mpsc::channel(20);
 
@@ -31,7 +30,6 @@ macro_rules! proxy {
 
         impl $name {
             $(
-                #[allow(unused)]
                 $fv async fn $fn_name (&self, $($p : $pty),* ) -> $crate::proxy::Result $(< $rty >)? {
                     let (c, h) = $crate::futures::channel::oneshot::channel();
 
@@ -53,7 +51,6 @@ macro_rules! proxy {
             type [<$name Receiver>] = $crate::futures::channel::mpsc::Receiver< [<$name Message>] >;
 
             #[derive(Debug)]
-            #[allow(unused)]
             $v enum [<$name Message>] {
                 $( [< $fn_name:camel >] { $($p : $pty,)* callback: $crate::proxy::Callback $( < $rty > )? } ),*
             }
