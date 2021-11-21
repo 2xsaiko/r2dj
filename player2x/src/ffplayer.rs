@@ -3,10 +3,8 @@ use std::fmt::Debug;
 use std::io;
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use dasp::{Frame, Sample};
@@ -25,10 +23,6 @@ use audiopipe::AudioSource;
 
 use crate::ffmpeg::{ffpipe, FfmpegConfig, Format, PathSource, TranscoderOutput};
 use crate::ffprobe;
-
-// TODO replace with Duration::ZERO
-// https://github.com/rust-lang/rust/issues/73544
-const ZERO: Duration = Duration::from_secs(0);
 
 pub struct Player<W> {
     path: PathBuf,
@@ -65,7 +59,7 @@ impl Player<AudioSource> {
             duration: info.duration(),
             pipe: Arc::new(Mutex::new(pipe)),
             state: Arc::new(Mutex::new(State {
-                position: ZERO,
+                position: Duration::ZERO,
                 playing_state: None,
                 playing_tracker: None,
             })),
@@ -185,10 +179,10 @@ impl Player<AudioSource> {
     pub async fn seek(&mut self, pos: Duration) {
         if self.is_playing().await {
             self.pause().await;
-            self.state.lock().await.position = pos.clamp(ZERO, self.duration);
+            self.state.lock().await.position = pos.clamp(Duration::ZERO, self.duration);
             self.play().await;
         } else {
-            self.state.lock().await.position = pos.clamp(ZERO, self.duration);
+            self.state.lock().await.position = pos.clamp(Duration::ZERO, self.duration);
         }
     }
 }
