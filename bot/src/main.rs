@@ -23,6 +23,8 @@ use crate::player::{Event as RoomEvent, Room};
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+mod comms;
+
 mod commands;
 mod config;
 mod db;
