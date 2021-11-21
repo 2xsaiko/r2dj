@@ -14,6 +14,7 @@ use tokio::time::interval;
 use uuid::Uuid;
 
 use audiopipe::Core;
+use msgtools::Ac;
 use mumble::{MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
 
@@ -22,9 +23,6 @@ use crate::player::{Event as RoomEvent, Room};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-mod comms;
-mod containers;
 
 mod commands;
 mod config;
@@ -62,9 +60,11 @@ async fn main() {
         .unwrap();
 
     let id = Uuid::from_str("99b071f7-bdae-48b4-9c0a-aac91332c348").unwrap();
-    let pl = entity::LPlaylist::load(id, &mut pool.acquire().await.unwrap())
-        .await
-        .unwrap();
+    let pl = Ac::new(
+        entity::Playlist::load(id, &mut pool.acquire().await.unwrap())
+            .await
+            .unwrap(),
+    );
 
     println!("{:#?}", pl);
 

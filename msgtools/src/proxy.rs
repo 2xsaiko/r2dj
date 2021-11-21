@@ -13,13 +13,13 @@ macro_rules! proxy {
     ) => {
         paste::paste! {
             $v struct $name {
-                pipe: std::sync::Mutex<futures::channel::mpsc::Sender< [<$name Message>] >>
+                pipe: std::sync::Mutex<$crate::futures::channel::mpsc::Sender< [<$name Message>] >>
             }
 
             impl $name {
                 #[allow(unused)]
                 $v fn channel() -> ($name, [<$name Receiver>]) {
-                    let (tx, rx) = futures::channel::mpsc::channel(20);
+                    let (tx, rx) = $crate::futures::channel::mpsc::channel(20);
 
                     (
                         $name { pipe: std::sync::Mutex::new(tx) },
@@ -32,8 +32,8 @@ macro_rules! proxy {
         impl $name {
             $(
                 #[allow(unused)]
-                $fv async fn $fn_name (&self, $($p : $pty),* ) -> $crate::comms::Result $(< $rty >)? {
-                    let (c, h) = futures::channel::oneshot::channel();
+                $fv async fn $fn_name (&self, $($p : $pty),* ) -> $crate::proxy::Result $(< $rty >)? {
+                    let (c, h) = $crate::futures::channel::oneshot::channel();
 
                     paste::paste! {
                         let msg = [<$name Message>] :: [< $fn_name:camel >] {
@@ -42,7 +42,7 @@ macro_rules! proxy {
                         };
                     }
 
-                    futures::SinkExt::send(&mut *self.pipe.lock().unwrap(), msg).await?;
+                    $crate::futures::SinkExt::send(&mut *self.pipe.lock().unwrap(), msg).await?;
 
                     Ok(h.await?)
                 }
@@ -50,12 +50,12 @@ macro_rules! proxy {
         }
 
         paste::paste! {
-            type [<$name Receiver>] = futures::channel::mpsc::Receiver< [<$name Message>] >;
+            type [<$name Receiver>] = $crate::futures::channel::mpsc::Receiver< [<$name Message>] >;
 
             #[derive(Debug)]
             #[allow(unused)]
             $v enum [<$name Message>] {
-                $( [< $fn_name:camel >] { $($p : $pty,)* callback: $crate::comms::Callback $( < $rty > )? } ),*
+                $( [< $fn_name:camel >] { $($p : $pty,)* callback: $crate::proxy::Callback $( < $rty > )? } ),*
             }
         }
     };
@@ -94,6 +94,8 @@ pub enum Error {
 
 #[cfg(test)]
 mod test {
+    use futures::executor::LocalPool;
+    use futures::task::{LocalSpawnExt, SpawnExt};
     use futures::StreamExt;
 
     proxy! {
@@ -123,16 +125,22 @@ mod test {
 
     #[test]
     fn test() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            let (mut test, tr) = Test::channel();
+        let mut pool = LocalPool::new();
+        let spawner = pool.spawner();
 
-            tokio::spawn(run(tr));
+        pool.spawner()
+            .spawn_local(async move {
+                let (test, tr) = Test::channel();
 
-            let result = test.hello("2xsaiko".to_string()).await.unwrap();
-            assert_eq!("Hello, 2xsaiko!", result);
-            assert_eq!(false, test.yeah().await.unwrap());
-            assert_eq!(true, test.yeah().await.unwrap());
-        });
+                spawner.spawn(run(tr)).unwrap();
+
+                let result = test.hello("2xsaiko".to_string()).await.unwrap();
+                assert_eq!("Hello, 2xsaiko!", result);
+                assert_eq!(false, test.yeah().await.unwrap());
+                assert_eq!(true, test.yeah().await.unwrap());
+            })
+            .unwrap();
+
+        pool.run();
     }
 }

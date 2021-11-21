@@ -1,9 +1,10 @@
 use std::borrow::Borrow;
 use std::fmt::{Display, Formatter};
+use std::num::ParseIntError;
 use std::ops::{
-    Deref, Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo,
-    RangeToInclusive,
+    Deref, Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
+use std::str::FromStr;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
 pub struct TreePathBuf {
@@ -150,6 +151,29 @@ impl Display for TreePath {
             Ok(())
         } else {
             write!(f, "-")
+        }
+    }
+}
+
+impl FromStr for TreePathBuf {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "" || s == "-" {
+            Ok(TreePathBuf::root())
+        } else {
+            let mut path = Vec::new();
+
+            for entry in s.split('-') {
+                if entry.is_empty() {
+                    continue;
+                }
+
+                let i = entry.parse()?;
+                path.push(i);
+            }
+
+            Ok(TreePathBuf { path })
         }
     }
 }

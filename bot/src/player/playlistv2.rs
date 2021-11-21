@@ -2,17 +2,18 @@ use std::collections::HashMap;
 
 use log::debug;
 
+use msgtools::Ac;
+
 use crate::db::entity::playlist::Content;
-use crate::db::entity::{LPlaylist, Track};
+use crate::db::entity::{Playlist, Track};
 use crate::db::object::playlist::NestingMode;
-use crate::entity::Playlist;
 use crate::player::playlistv2::treepath::{TreePath, TreePathBuf};
 
 pub mod treepath;
 
 #[derive(Debug, Clone)]
 pub struct PlaylistTracker {
-    playlist: LPlaylist,
+    playlist: Ac<Playlist>,
     trackers: HashMap<TreePathBuf, Vec<(u16, TreePathBuf)>>,
     iteration: u16,
 }
@@ -24,7 +25,7 @@ pub enum GetTrackError {
 }
 
 impl PlaylistTracker {
-    pub fn new(playlist: LPlaylist) -> Self {
+    pub fn new(playlist: Ac<Playlist>) -> Self {
         PlaylistTracker {
             playlist,
             trackers: HashMap::new(),
@@ -195,15 +196,19 @@ impl PlaylistTracker {
         }
     }
 
-    pub fn add_track(&mut self, track: Track) {
+    pub fn add_track(&mut self, track: Track, parent: impl AsRef<TreePath>) {
         self.playlist.push_track(track)
     }
 
-    pub fn add_playlist(&mut self, playlist: Playlist) {
-        self.playlist.push_playlist(playlist)
+    pub fn add_playlist(
+        &mut self,
+        playlist: Playlist,
+        parent: impl AsRef<TreePath>,
+    ) -> Result<(), Playlist> {
+        self.playlist.add_playlist(playlist, parent)
     }
 
-    pub fn playlist(&self) -> &Playlist {
+    pub fn playlist(&self) -> &Ac<Playlist> {
         &self.playlist
     }
 }

@@ -1,14 +1,10 @@
-use std::future::Future;
-
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use sqlx::postgres::PgQueryResult;
 use sqlx::{Acquire, PgConnection};
 use uuid::Uuid;
 
-use crate::containers::Container;
 use crate::db::{entity, object, objgen};
-use crate::declare_container;
 use crate::player::treepath::TreePath;
 
 #[derive(Debug, Clone)]
@@ -38,18 +34,6 @@ impl Playlist {
     }
 }
 
-declare_container! {
-    pub type LPlaylist = Container<Playlist> {
-        pub fn new() -> Self;
-    }
-}
-
-impl LPlaylist {
-    pub fn load(id: Uuid, db: &mut PgConnection) -> impl Future<Output = sqlx::Result<Self>> + '_ {
-        Playlist::load(id, db).map(|res| res.map(|c| Container::wrap(c)))
-    }
-}
-
 impl Playlist {
     pub fn set_title(&mut self, title: impl Into<String>) {
         self.object.set_title(title);
@@ -67,6 +51,61 @@ impl Playlist {
             id: Uuid::new_v4(),
             content: Content::Playlist(playlist),
         });
+    }
+
+    pub fn push_content(&mut self, content: Content) {
+        self.entries.push(PlaylistEntry {
+            id: Uuid::new_v4(),
+            content,
+        })
+    }
+
+    pub fn add_track(
+        &mut self,
+        track: entity::Track,
+        path: impl AsRef<TreePath>,
+    ) -> Result<(), entity::Track> {
+        match self.add_content(Content::Track(track), path) {
+            Ok(_) => Ok(()),
+            Err(Content::Track(v)) => Err(v),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn add_playlist(
+        &mut self,
+        playlist: Playlist,
+        path: impl AsRef<TreePath>,
+    ) -> Result<(), Playlist> {
+        match self.add_content(Content::Playlist(playlist), path) {
+            Ok(_) => Ok(()),
+            Err(Content::Playlist(v)) => Err(v),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn add_content(
+        &mut self,
+        content: Content,
+        path: impl AsRef<TreePath>,
+    ) -> Result<(), Content> {
+        let path = path.as_ref();
+
+        if path.is_empty() {
+            self.push_content(content);
+            Ok(())
+        } else {
+            let idx = path.to_slice()[0];
+            let el = match self.entries.get_mut(idx as usize) {
+                None => return Err(content),
+                Some(v) => v,
+            };
+
+            match &mut el.content {
+                Content::Track(_) => Err(content),
+                Content::Playlist(pl) => pl.add_content(content, &path[1..]),
+            }
+        }
     }
 
     pub fn entries(&self) -> &[PlaylistEntry] {

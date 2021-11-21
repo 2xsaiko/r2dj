@@ -1,9 +1,13 @@
 use std::borrow::Cow;
 use std::fmt::Write;
+use std::str::FromStr;
 
 use clap::{App, AppSettings, Arg};
 
-use crate::db::entity::{playlist, LPlaylist, Playlist};
+use msgtools::Ac;
+
+use crate::db::entity::{playlist, Playlist};
+use crate::player::treepath::TreePathBuf;
 use crate::Bot;
 
 const COMMAND_PREFIX: char = ';';
@@ -108,21 +112,30 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    let pl = bot.room.playlist();
+    let pl = match bot.room.proxy().playlist().await {
+        Ok(v) => v,
+        Err(e) => {
+            bot.client
+                .respond(ev, &format!("failed to get playlist: {}", e))
+                .await;
+            return;
+        }
+    };
+
     let max_length = bot.client.max_message_length();
 
     let mut message = String::new();
 
-    if let Some(id) = pl.playlist().object().id() {
-        writeln!(message, "{} ({})", pl.playlist().object().title(), id).unwrap();
+    if let Some(id) = pl.object().id() {
+        writeln!(message, "{} ({})", pl.object().title(), id).unwrap();
     } else {
-        writeln!(message, "{}", pl.playlist().object().title()).unwrap();
+        writeln!(message, "{}", pl.object().title()).unwrap();
     }
 
     writeln!(message, "<table><tr><th><u>P</u>os</th><th><u>T</u>itle</th><th><u>A</u>rtist</th><th>A<u>l</u>bum</th></tr>").unwrap();
     writeln!(message, "<tr><th></th><th></th><th>Shuffle</th></tr>").unwrap();
 
-    for (idx, entry) in pl.playlist().entries().iter().enumerate() {
+    for (idx, entry) in pl.entries().iter().enumerate() {
         match entry.content() {
             playlist::Content::Track(tr) => {
                 let (artist, album) = ("", ""); // TODO
@@ -174,17 +187,13 @@ async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    let mut playlist = LPlaylist::new();
+    let mut playlist = Ac::new(Playlist::new());
 
     if let Some(name) = matches.value_of("name") {
         playlist.set_title(name);
     }
 
-    let _ = bot
-        .room
-        .proxy()
-        .set_playlist(playlist)
-        .await;
+    let _ = bot.room.proxy().set_playlist(playlist).await;
 }
 
 async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -203,7 +212,22 @@ async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    bot.room.add_playlist(Playlist::new());
+    let path = matches.value_of("path").unwrap();
+    let path = match TreePathBuf::from_str(path) {
+        Ok(v) => v,
+        Err(e) => {
+            bot.client
+                .respond(ev, &format!("error: {}: {}", e, path))
+                .await;
+            return;
+        }
+    };
+
+    bot.room
+        .proxy()
+        .add_playlist(Ac::new(Playlist::new()), path)
+        .await
+        .unwrap();
 }
 
 async fn quit(bot: &Bot, _ev: &mumble::event::Message, _args: &[String]) {

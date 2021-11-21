@@ -10,6 +10,7 @@ edition = "2018"
 mumble = { path = "../mumble" }
 player2x = { path = "../player2x" }
 audiopipe = { path = "../audiopipe" }
+msgtools = { path = "../msgtools" }
 
 clap = "3.0.0-beta.4"
 tokio = { version = "1.2.0", features = ["full"] }

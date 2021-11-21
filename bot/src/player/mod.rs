@@ -1,11 +1,10 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::StreamExt;
-use log::debug;
-use log::error;
+use log::{debug, error, warn};
 use petgraph::graph::NodeIndex;
 use pin_project_lite::pin_project;
 use tokio::sync::broadcast;
@@ -13,11 +12,12 @@ use tokio::time::Duration;
 use uuid::Uuid;
 
 use audiopipe::{AudioSource, Core};
+use msgtools::{proxy, Ac};
 use player2x::ffplayer::{Player, PlayerEvent};
+use playlistv2::treepath::TreePathBuf;
 pub use playlistv2::*;
 
-use crate::db::entity::{Playlist, LPlaylist, Track};
-use crate::proxy;
+use crate::db::entity::{Playlist, Track};
 
 pub mod import;
 // mod playlist;
@@ -30,18 +30,16 @@ proxy! {
         pub async fn pause();
         pub async fn next();
         pub async fn add_to_queue(track: Track);
-        pub async fn set_playlist(playlist: LPlaylist);
-        pub async fn playlist() -> LPlaylist;
-        pub async fn add_playlist(playlist: LPlaylist);
+        pub async fn set_playlist(playlist: Ac<Playlist>);
+        pub async fn playlist() -> Ac<Playlist>;
+        pub async fn add_playlist(playlist: Ac<Playlist>, path: TreePathBuf) -> bool;
     }
 }
 
 pub struct Room {
     id: Uuid,
-    clients: Vec<Client>,
     tx: Room1,
     event_tx: broadcast::Sender<Event>,
-    shared: Arc<Mutex<Shared>>,
 }
 
 struct RoomService {
@@ -50,19 +48,16 @@ struct RoomService {
     audio_out: NodeIndex,
     ac: Arc<Core>,
     event_tx: broadcast::Sender<Event>,
-    shared: Arc<Mutex<Shared>>,
+    mode: PlayMode,
+    playlist: PlaylistTracker,
+    track_state: Option<TrackState>,
+    clients: Vec<Client>,
 }
 
 pub enum PlayMode {
     Once,
     Repeat,
     RepeatOne,
-}
-
-struct Shared {
-    mode: PlayMode,
-    playlist: PlaylistTracker,
-    track_state: Option<TrackState>,
 }
 
 pub enum Client {
@@ -78,19 +73,16 @@ impl Room {
     pub fn new(audio_out: NodeIndex, ac: Arc<Core>) -> Self {
         let (event_tx, _) = broadcast::channel(20);
 
-        let shared = Arc::new(Mutex::new(Shared {
-            mode: PlayMode::Repeat,
-            playlist: PlaylistTracker::new(LPlaylist::new()),
-            track_state: None,
-        }));
-
         let rd = RoomService {
             player: None,
             player_receiver: None,
             audio_out,
             ac,
             event_tx: event_tx.clone(),
-            shared: shared.clone(),
+            mode: PlayMode::Repeat,
+            playlist: PlaylistTracker::new(Ac::new(Playlist::new())),
+            track_state: None,
+            clients: vec![],
         };
 
         let (tx, rx) = Room1::channel();
@@ -99,10 +91,8 @@ impl Room {
 
         let r = Room {
             id: Uuid::new_v4(),
-            clients: vec![],
             tx,
             event_tx,
-            shared,
         };
 
         r
@@ -112,29 +102,15 @@ impl Room {
         &self.tx
     }
 
-    pub fn playlist(&self) -> PlaylistTracker {
-        self.shared.lock().unwrap().playlist.clone()
-    }
-
-    pub fn add_playlist(&self, playlist: Playlist) {
-        self.shared.lock().unwrap().playlist.add_playlist(playlist);
-    }
-
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.event_tx.subscribe()
     }
 }
 
 impl RoomService {
-    fn get_next(&self) -> Option<Track> {
+    fn get_next(&mut self) -> Option<Track> {
         // TODO song queuing
-        self.shared
-            .lock()
-            .unwrap()
-            .playlist
-            .next()
-            .map(|x| x.clone())
-            .ok()
+        self.playlist.next().map(|x| x.clone()).ok()
     }
 
     async fn skip(&mut self) {
@@ -205,18 +181,20 @@ async fn run_room(mut data: RoomService, mut rx: Room1Receiver) {
                         let _ = callback.send(());
                     }
                     Room1Message::AddToQueue { track, callback } => {
-                        todo!()
+                        warn!("AddToQueue unimplemented");
+                        let _ = callback.send(());
                     }
                     Room1Message::SetPlaylist { playlist, callback } => {
-                        data.shared.lock().unwrap().playlist = PlaylistTracker::new(playlist);
+                        data.playlist = PlaylistTracker::new(playlist);
                         data.skip().await;
                         let _ = callback.send(());
                     }
                     Room1Message::Playlist { callback } => {
-                        todo!()
+                        let _ = callback.send(data.playlist.playlist().clone());
                     }
-                    Room1Message::AddPlaylist { playlist, callback } => {
-                        let _ = callback.send(());
+                    Room1Message::AddPlaylist { playlist, path, callback } => {
+                        let success = data.playlist.add_playlist(playlist.into_inner(), path).is_ok();
+                        let _ = callback.send(success);
                     }
                 }
             }
