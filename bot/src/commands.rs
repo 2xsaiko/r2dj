@@ -12,7 +12,7 @@ use crate::Bot;
 
 const COMMAND_PREFIX: char = ';';
 
-pub async fn handle_message_event(bot: &Bot, ev: &mumble::event::Message) {
+pub async fn handle_message_event(bot: &mut Bot, ev: &mumble::event::Message) {
     let name: Cow<_> = match ev.actor {
         None => "<unknown>".into(),
         Some(r) => bot
@@ -34,7 +34,7 @@ pub async fn handle_message_event(bot: &Bot, ev: &mumble::event::Message) {
     }
 }
 
-async fn handle_command(bot: &Bot, ev: &mumble::event::Message, msg: &str) {
+async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) {
     let cmds = tokenize(msg);
 
     for cmdline in cmds {
@@ -240,8 +240,10 @@ async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         .unwrap();
 }
 
-async fn quit(bot: &Bot, _ev: &mumble::event::Message, _args: &[String]) {
-    todo!();
+async fn quit(bot: &mut Bot, _ev: &mumble::event::Message, _args: &[String]) {
+    if let Some(tx) = bot.shutdown_fuse.take() {
+        let _ = tx.send(());
+    }
 }
 
 // TODO: make this in cmdparser public so I don't have to copy it

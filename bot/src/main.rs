@@ -6,6 +6,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures::channel::oneshot;
+use futures::{FutureExt, StreamExt};
 use log::{debug, info, LevelFilter};
 use simplelog::{Config, TerminalMode};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -94,13 +96,23 @@ async fn main() {
     let mut rst = RoomStatus::default();
     let mut update_timer = interval(Duration::from_secs(5));
 
-    let bot = Bot { client, room };
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let mut shutdown_rx = shutdown_rx.into_stream();
+
+    let mut bot = Bot {
+        client,
+        room,
+        shutdown_fuse: Some(shutdown_tx),
+    };
 
     // let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
     // player.play().await;
 
     loop {
         tokio::select! {
+            _ = shutdown_rx.next() => {
+                break;
+            }
             _ = update_timer.tick() => {
                 update_status(&bot.client, &mut prev_rst, &rst).await;
             }
@@ -113,7 +125,7 @@ async fn main() {
                 debug!("{:?}", ev);
 
                 match ev {
-                    mumble::Event::Message(ev) => commands::handle_message_event(&bot, &ev).await,
+                    mumble::Event::Message(ev) => commands::handle_message_event(&mut bot, &ev).await,
                     _ => {}
                 }
             }
@@ -164,6 +176,7 @@ async fn main() {
 pub struct Bot {
     client: MumbleClient,
     room: Room,
+    shutdown_fuse: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
