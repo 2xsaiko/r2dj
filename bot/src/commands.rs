@@ -61,6 +61,7 @@ fn app_for_command(name: &'static str) -> App {
 
 macro_rules! unwrap_matches {
     ($matches:ident, $bot:expr, $ev:expr) => {
+        #[allow(unused)]
         let $matches = match $matches {
             Ok(v) => v,
             Err(e) => {

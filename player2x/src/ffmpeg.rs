@@ -78,9 +78,9 @@ where
 pub trait TranscoderInput<'a>: Sized {
     fn to_arg(&self) -> &OsStr;
 
-    fn pre_spawn(&self, command: &mut Command) {}
+    fn pre_spawn(&self, _command: &mut Command) {}
 
-    fn handle_stdin(self, stdout: ChildStdin) -> BoxFuture<'a, io::Result<()>> {
+    fn handle_stdin(self, _stdout: ChildStdin) -> BoxFuture<'a, io::Result<()>> {
         async { Ok(()) }.boxed()
     }
 }
@@ -102,9 +102,9 @@ pub struct PipeSource<T> {
 pub trait TranscoderOutput<'a>: Sized {
     fn to_arg(&self) -> &OsStr;
 
-    fn pre_spawn(&self, command: &mut Command) {}
+    fn pre_spawn(&self, _command: &mut Command) {}
 
-    fn handle_stdout(self, stdout: ChildStdout) -> BoxFuture<'a, io::Result<()>> {
+    fn handle_stdout(self, _stdout: ChildStdout) -> BoxFuture<'a, io::Result<()>> {
         async { Ok(()) }.boxed()
     }
 }

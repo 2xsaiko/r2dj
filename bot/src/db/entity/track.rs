@@ -104,7 +104,7 @@ impl Track {
 
     pub async fn save(&mut self, db: &mut PgConnection) -> objgen::Result<PgQueryResult> {
         let mut ta = db.begin().await?;
-        let mut r = self.object.save(&mut ta).await?;
+        let r = self.object.save(&mut ta).await?;
 
         Ok(r)
     }

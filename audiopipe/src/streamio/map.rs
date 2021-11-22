@@ -26,7 +26,7 @@ where
     T: StreamWrite<O> + Unpin,
 {
     fn poll_write(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[I],
     ) -> Poll<io::Result<usize>> {

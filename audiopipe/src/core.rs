@@ -10,7 +10,7 @@ use dasp::ring_buffer::Bounded;
 use dasp::{Frame, Signal};
 use dasp_graph::{process, BoxedNodeSend, Buffer, Input, NodeData};
 use futures::Sink;
-use log::{debug, warn};
+use log::warn;
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 
@@ -63,8 +63,8 @@ impl CoreData {
     }
 
     fn add_node<N>(&mut self, node: NodeData<N>) -> NodeIndex
-        where
-            N: dasp_graph::Node + Send + 'static,
+    where
+        N: dasp_graph::Node + Send + 'static,
     {
         self.graph.add_node(NodeData::new(
             Node::Boxed(BoxedNodeSend::new(node.node)),
@@ -72,10 +72,7 @@ impl CoreData {
         ))
     }
 
-    fn add_input_to(
-        &mut self,
-        output: Option<NodeIndex>,
-    ) -> AudioSource {
+    fn add_input_to(&mut self, output: Option<NodeIndex>) -> AudioSource {
         let shared = Arc::new(AudioSourceShared {
             running: AtomicBool::new(false),
             data: Mutex::new(AudioSourceShared1 {
@@ -155,10 +152,7 @@ impl Core {
         data.add_input_to(out)
     }
 
-    pub fn add_input_to(
-        &self,
-        output: Option<NodeIndex>,
-    ) -> AudioSource {
+    pub fn add_input_to(&self, output: Option<NodeIndex>) -> AudioSource {
         self.data.lock().unwrap().add_input_to(output)
     }
 
@@ -241,11 +235,11 @@ impl StreamWrite<[f32; 2]> for AudioSource {
         }
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -272,11 +266,11 @@ impl Sink<[f32; 2]> for AudioSource {
         Ok(())
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -356,8 +350,8 @@ impl dasp_graph::Node for OutputNode {
 }
 
 impl Signal for OutputSignal
-    where
-        [f32; 2]: Frame,
+where
+    [f32; 2]: Frame,
 {
     type Frame = [f32; 2];
 

@@ -1,6 +1,5 @@
 use std::convert::TryInto;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use log::{debug, error, info};
 use mumble_protocol::control::{msgs, ControlPacket};

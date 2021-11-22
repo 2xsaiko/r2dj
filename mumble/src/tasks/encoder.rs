@@ -8,7 +8,7 @@ use dasp::{Frame, Sample, Signal};
 use log::debug;
 use mumble_protocol::voice::VoicePacketPayload;
 use tokio::select;
-use tokio::sync::{mpsc, watch, Mutex};
+use tokio::sync::{mpsc, Mutex};
 use tokio::time;
 
 pub(super) async fn encoder<S>(

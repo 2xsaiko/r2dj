@@ -1,23 +1,21 @@
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 use std::io;
 use std::net::SocketAddr;
 use std::ops::{ControlFlow, Try};
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use futures::{Sink, SinkExt, Stream, StreamExt, TryFutureExt};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use log::{debug, error};
 use mumble_protocol::control::{msgs, ControlPacket};
-use mumble_protocol::voice::{VoicePacket, VoicePacketPayload};
+use mumble_protocol::voice::VoicePacket;
 use mumble_protocol::{Clientbound, Serverbound};
 use petgraph::graph::NodeIndex;
 use tokio::select;
-use tokio::sync::{broadcast, mpsc, watch, Mutex as AsyncMutex};
-use tokio::task::JoinHandle;
+use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
 use tokio::time::interval;
 
-use audiopipe::{Core, OutputSignal};
+use audiopipe::OutputSignal;
 use encoder::encoder;
 use msgtools::Ac;
 
@@ -73,7 +71,7 @@ macro_rules! try_or_break {
     ($e:expr) => {
         match Try::branch($e) {
             ControlFlow::Continue(v) => v,
-            ControlFlow::Break(b) => break,
+            ControlFlow::Break(_) => break,
         }
     };
 }
@@ -97,8 +95,9 @@ where
         tokio::spawn(encoder(voice_tx, self.output.clone()));
 
         loop {
+            debug!("boop!");
             select! {
-                timestamp = ping_timer.tick() => {
+                _timestamp = ping_timer.tick() => {
                     if !self.send_ping().await {
                         break;
                     }

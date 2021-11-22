@@ -49,7 +49,7 @@ pub trait StreamRead<T> {
 }
 
 pub trait StreamWriteExt<T>: StreamWrite<T> {
-    fn write<'a>(&'a mut self, buf: &'a [T]) -> Write<'a, Self, T> {
+    fn write<'a>(&'a mut self, _buf: &'a [T]) -> Write<'a, Self, T> {
         todo!()
     }
 

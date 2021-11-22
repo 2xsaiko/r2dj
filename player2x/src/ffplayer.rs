@@ -218,16 +218,12 @@ pub enum PlayerEvent {
 }
 
 struct Recoder<T> {
-    buffer: [u8; 4],
-    buf_len: u8,
     inner: T,
 }
 
 impl<T> Recoder<T> {
     pub fn new(inner: T) -> Self {
         Recoder {
-            buffer: [0; 4],
-            buf_len: 0,
             inner,
         }
     }

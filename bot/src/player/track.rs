@@ -3,8 +3,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
-use futures::TryStreamExt;
-use sqlx::PgPool;
 use thiserror::Error;
 use tokio::process::Command;
 use url::Url;

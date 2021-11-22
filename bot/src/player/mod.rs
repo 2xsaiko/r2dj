@@ -176,7 +176,7 @@ async fn run_room(mut data: RoomService, mut rx: Room1Receiver) {
 
                         let _ = callback.send(());
                     }
-                    Room1Message::Next { callback }=> {
+                    Room1Message::Next { callback } => {
                         data.skip().await;
                         let _ = callback.send(());
                     }
