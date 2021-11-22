@@ -4,8 +4,10 @@ use bit_set::BitSet;
 use mumble_protocol::control::msgs;
 use tokio::sync::broadcast;
 
-use crate::Event;
+use msgtools::Ac;
+
 use crate::event::UserMoved;
+use crate::Event;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ChannelRef {
@@ -35,10 +37,10 @@ pub struct User {
     channel: ChannelRef,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ServerState {
-    channels: HashMap<u32, Channel>,
-    users: HashMap<u32, User>,
+    channels: HashMap<u32, Ac<Channel>>,
+    users: HashMap<u32, Ac<User>>,
     max_message_length: Option<u32>,
     event_subscriber: broadcast::Sender<Event>,
 }
@@ -52,7 +54,7 @@ impl ChannelRef {
         ChannelRef { id: 0 }
     }
 
-    pub fn get(&self, st: &ServerState) -> Option<Channel> {
+    pub fn get(&self, st: &ServerState) -> Option<Ac<Channel>> {
         st.channels.get(&self.id).cloned()
     }
 
@@ -66,7 +68,7 @@ impl UserRef {
         UserRef { id }
     }
 
-    pub fn get(&self, st: &ServerState) -> Option<User> {
+    pub fn get(&self, st: &ServerState) -> Option<Ac<User>> {
         st.users.get(&self.id).cloned()
     }
 
@@ -82,6 +84,10 @@ impl Channel {
 
     pub fn id(&self) -> u32 {
         self.id
+    }
+
+    pub fn to_ref(&self) -> ChannelRef {
+        ChannelRef::new(self.id)
     }
 
     pub fn parent(&self) -> ChannelRef {
@@ -137,22 +143,24 @@ impl ServerState {
         }
     }
 
-    pub fn user(&self, id: u32) -> Option<&User> {
-        self.users.get(&id)
+    pub fn user(&self, id: u32) -> Option<Ac<User>> {
+        self.users.get(&id).cloned()
     }
 
-    pub fn channel(&self, id: u32) -> Option<&Channel> {
-        self.channels.get(&id)
+    pub fn channel(&self, id: u32) -> Option<Ac<Channel>> {
+        self.channels.get(&id).cloned()
     }
 
     pub fn update_user(&mut self, mut state: msgs::UserState) {
         let session_id = state.get_session();
 
-        let user = self.users.entry(session_id).or_insert_with(|| User {
-            id: session_id,
-            name: String::new(),
-            registered_id: None,
-            channel: ChannelRef::new(0),
+        let user = self.users.entry(session_id).or_insert_with(|| {
+            Ac::new(User {
+                id: session_id,
+                name: String::new(),
+                registered_id: None,
+                channel: ChannelRef::new(0),
+            })
         });
 
         if state.has_name() {
@@ -187,13 +195,15 @@ impl ServerState {
     pub fn update_channel(&mut self, mut state: msgs::ChannelState) {
         let channel_id = state.get_channel_id();
 
-        let channel = self.channels.entry(channel_id).or_insert_with(|| Channel {
-            id: channel_id,
-            name: String::new(),
-            parent: ChannelRef::root(),
-            links: BitSet::new(),
-            description: String::new(),
-            max_users: 0,
+        let channel = self.channels.entry(channel_id).or_insert_with(|| {
+            Ac::new(Channel {
+                id: channel_id,
+                name: String::new(),
+                parent: ChannelRef::root(),
+                links: BitSet::new(),
+                description: String::new(),
+                max_users: 0,
+            })
         });
 
         if state.has_name() {

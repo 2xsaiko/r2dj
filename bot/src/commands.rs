@@ -15,7 +15,15 @@ const COMMAND_PREFIX: char = ';';
 pub async fn handle_message_event(bot: &Bot, ev: &mumble::event::Message) {
     let name: Cow<_> = match ev.actor {
         None => "<unknown>".into(),
-        Some(r) => bot.client.get_user(r).unwrap().name().to_string().into(),
+        Some(r) => bot
+            .client
+            .get_user(r)
+            .await
+            .unwrap()
+            .unwrap()
+            .name()
+            .to_string()
+            .into(),
     };
 
     println!("{}: {}", name, ev.message);
@@ -60,7 +68,8 @@ macro_rules! unwrap_matches {
                 let text = format!("{}", e).replace('&', "&amp;").replace('<', "&lt;");
                 $bot.client
                     .respond(&$ev, &format!("<pre>{}</pre>", text))
-                    .await;
+                    .await
+                    .unwrap();
                 return;
             }
         };
@@ -117,7 +126,8 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         Err(e) => {
             bot.client
                 .respond(ev, &format!("failed to get playlist: {}", e))
-                .await;
+                .await
+                .unwrap();
             return;
         }
     };
@@ -169,7 +179,7 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
 
     writeln!(message, "</table>").unwrap();
 
-    bot.client.respond(&ev, &message).await;
+    bot.client.respond(&ev, &message).await.unwrap();
 }
 
 async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
@@ -218,7 +228,7 @@ async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         Err(e) => {
             bot.client
                 .respond(ev, &format!("error: {}: {}", e, path))
-                .await;
+                .await.unwrap();
             return;
         }
     };

@@ -14,7 +14,7 @@ use tokio::time;
 pub(super) async fn encoder<S>(
     voice_tx: mpsc::Sender<VoicePacketPayload>,
     pipe: Arc<Mutex<S>>,
-    mut stop_recv: watch::Receiver<()>,
+    // mut stop_recv: watch::Receiver<()>,
 ) where
     S: Signal,
     <S::Frame as Frame>::Sample: ToSample<i16>,
@@ -76,7 +76,7 @@ pub(super) async fn encoder<S>(
 
     select! {
         _ = op => {}
-        _ = stop_recv.changed() => {}
+        // _ = stop_recv.changed() => {}
     }
 
     debug!("encoder exit");

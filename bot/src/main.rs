@@ -84,9 +84,9 @@ async fn main() {
     .await
     .unwrap();
 
-    let mut r = client.event_subscriber();
+    let mut r = client.event_subscriber().await.unwrap();
 
-    let room = Room::new(client.audio_input(), ac);
+    let room = Room::new(client.audio_input().await.unwrap(), ac);
     let mut room_events = room.subscribe();
     let _ = room.proxy().set_playlist(pl).await;
 
@@ -157,8 +157,8 @@ async fn main() {
         }
     }
 
-    bot.client.message_my_channel("quitting!").await;
-    bot.client.close().await;
+    let _ = bot.client.message_my_channel("quitting!").await;
+    bot.client.close().await.unwrap();
 }
 
 pub struct Bot {
@@ -226,7 +226,7 @@ async fn update_status(client: &MumbleClient, prev_st: &mut RoomStatus, st: &Roo
         CRATE_VERSION,
     );
 
-    client.set_comment(str).await;
+    client.set_comment(str).await.unwrap();
 
     *prev_st = st.clone();
 }

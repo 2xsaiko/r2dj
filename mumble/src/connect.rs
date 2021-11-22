@@ -54,7 +54,7 @@ pub enum ResultAction {
 
 pub async fn handle_packet(
     mut state: HandshakeState,
-    server_state: &Arc<Mutex<ServerState>>,
+    server_state: &mut ServerState,
     packet: ControlPacket<Clientbound>,
 ) -> ResultAction {
     match packet {
@@ -110,23 +110,19 @@ pub async fn handle_packet(
             }
         },
         ControlPacket::UserState(p) => {
-            let mut st = server_state.lock().unwrap();
-            st.update_user(*p);
+            server_state.update_user(*p);
             ResultAction::Continue(state)
         }
         ControlPacket::UserRemove(p) => {
-            let mut st = server_state.lock().unwrap();
-            st.remove_user(p.get_session());
+            server_state.remove_user(p.get_session());
             ResultAction::Continue(state)
         }
         ControlPacket::ChannelState(p) => {
-            let mut st = server_state.lock().unwrap();
-            st.update_channel(*p);
+            server_state.update_channel(*p);
             ResultAction::Continue(state)
         }
         ControlPacket::ChannelRemove(p) => {
-            let mut st = server_state.lock().unwrap();
-            st.remove_channel(p.get_channel_id());
+            server_state.remove_channel(p.get_channel_id());
             ResultAction::Continue(state)
         }
         x => {

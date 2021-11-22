@@ -1,5 +1,6 @@
-use std::sync::Arc;
-use std::sync::Mutex;
+#![feature(try_trait_v2)]
+
+use std::path::Path;
 
 use futures::stream::StreamExt;
 use futures::SinkExt;
@@ -9,18 +10,16 @@ use mumble_protocol::crypt::ClientCryptState;
 use petgraph::graph::NodeIndex;
 use sysinfo::SystemExt;
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, watch};
-use tokio::task::JoinHandle;
+use tokio::sync::broadcast;
 use tokio_util::codec::Decoder;
 use tokio_util::udp::UdpFramed;
 
 use audiopipe::Core;
+use msgtools::{proxy, Ac};
 
 use crate::connect::{HandshakeState, ResultAction};
 pub use crate::event::Event;
-use crate::server_state::{ChannelRef, ServerState, User, UserRef};
-use crate::tasks::{ConnectionInfo, Connectors};
-use std::path::Path;
+use crate::server_state::{Channel, ChannelRef, ServerState, User, UserRef};
 
 mod connect;
 pub mod event;
@@ -34,12 +33,22 @@ pub struct MumbleConfig {
     pub username: String,
 }
 
-pub struct MumbleClient {
-    stop_notify: watch::Sender<()>,
-    tasks: Vec<JoinHandle<()>>,
-    connectors: Connectors,
-    session: UserRef,
-    server_state: Arc<Mutex<ServerState>>,
+proxy! {
+    pub proxy MumbleClient {
+        pub async fn broadcast_message(channels: Vec<ChannelRef>, users: Vec<UserRef>, text: String);
+        pub async fn set_comment(comment: String);
+        pub async fn my_user() -> Ac<User>;
+        pub async fn my_user_ref() -> UserRef;
+        pub async fn my_channel() -> Ac<Channel>;
+        pub async fn my_channel_ref() -> ChannelRef;
+        pub async fn get_user(r: UserRef) -> Option<Ac<User>>;
+        pub async fn state() -> Ac<ServerState>;
+        pub async fn max_message_length() -> Option<u32>;
+        pub async fn allow_html_messages() -> Option<bool>;
+        pub async fn audio_input() -> NodeIndex;
+        pub async fn event_subscriber() -> broadcast::Receiver<Event>;
+        pub async fn close();
+    }
 }
 
 impl MumbleClient {
@@ -50,11 +59,6 @@ impl MumbleClient {
         config: MumbleConfig,
         ac: &Core,
     ) -> Result<Self, ()> {
-        let (stop_notify, stop_rx) = watch::channel(());
-        let connectors = Connectors::new(stop_rx, ac);
-
-        // actually connect
-
         info!("Connecting to {}, port {}", host, port);
         if let Some(certfile) = &certfile {
             info!("Using certificate '{}'", certfile.as_ref().display());
@@ -77,7 +81,7 @@ impl MumbleClient {
 
         let mut handshake_state = HandshakeState::default();
         let (tx, _) = broadcast::channel(20);
-        let server_state = Arc::new(Mutex::new(ServerState::new(tx.clone())));
+        let mut server_state = Ac::new(ServerState::new(tx.clone()));
 
         let result: Option<(ClientCryptState, u32)> = loop {
             match tcp.next().await {
@@ -85,7 +89,7 @@ impl MumbleClient {
                 Some(packet) => {
                     let packet = packet.unwrap();
 
-                    match connect::handle_packet(handshake_state, &server_state, packet).await {
+                    match connect::handle_packet(handshake_state, &mut server_state, packet).await {
                         ResultAction::Continue(state) => handshake_state = state,
                         ResultAction::Disconnect => break None,
                         ResultAction::TransferConnected(a, s) => break Some((a, s)),
@@ -104,111 +108,59 @@ impl MumbleClient {
             .expect("failed to open UDP socket");
         let udp = UdpFramed::new(udp_socket, cs);
 
-        let connection_info = ConnectionInfo::new(tcp, udp, peer_addr, server_state.clone());
+        let (client, recv) = MumbleClient::channel();
 
-        let tasks = tasks::start_tasks(connection_info, connectors.clone()).await;
-
-        Ok(MumbleClient {
-            stop_notify,
-            tasks,
-            connectors,
-            session: UserRef::new(session_id),
+        let state = tasks::State::new(
+            recv,
+            tcp,
+            udp,
+            peer_addr,
+            ac.add_output(),
             server_state,
-        })
+            UserRef::new(session_id),
+        );
+        tokio::spawn(state.handle_messages());
+
+        Ok(client)
     }
 
-    pub fn event_subscriber(&self) -> broadcast::Receiver<Event> {
-        self.connectors.event_subscriber()
+    pub async fn message_my_channel(&self, text: &str) -> proxy::Result {
+        self.message_channel(self.my_channel_ref().await?, text)
+            .await
     }
 
-    pub async fn message_my_channel(&self, text: &str) {
-        self.message_channel(self.channel(), text).await;
+    pub async fn message_channel<S>(&self, channel: ChannelRef, text: S) -> proxy::Result
+    where
+        S: Into<String>,
+    {
+        self.broadcast_message(vec![channel], vec![], text.into())
+            .await
     }
 
-    pub async fn message_channel(&self, channel: ChannelRef, text: &str) {
-        self.broadcast_message([channel], [], text).await;
+    pub async fn message_user<S>(&self, user: UserRef, text: S) -> proxy::Result
+    where
+        S: Into<String>,
+    {
+        self.broadcast_message(vec![], vec![user], text.into())
+            .await
     }
 
-    pub async fn message_user(&self, user: UserRef, text: &str) {
-        self.broadcast_message([], [user], text).await;
-    }
-
-    pub async fn respond(&self, ev: &event::Message, text: &str) {
+    pub async fn respond<S>(&self, ev: &event::Message, text: S) -> proxy::Result
+    where
+        S: Into<String>,
+    {
         let mut users = ev.receivers.clone();
 
         if let Some(actor) = ev.actor {
             users.push(actor);
         }
 
-        self.broadcast_message(ev.channels.iter().cloned(), users.into_iter(), text).await;
-    }
-
-    pub async fn broadcast_message<C, S>(&self, channels: C, users: S, text: &str)
-    where
-        C: IntoIterator<Item = ChannelRef>,
-        S: IntoIterator<Item = UserRef>,
-    {
-        let mut m = msgs::TextMessage::new();
-        m.mut_channel_id()
-            .extend(channels.into_iter().map(|el| el.id()));
-        m.mut_session()
-            .extend(users.into_iter().map(|el| el.session_id()));
-        m.set_message(text.to_string());
-        self.connectors.cp_tx().send(m.into()).await.unwrap();
-    }
-
-    pub async fn set_comment<S>(&self, text: S)
-    where
-        S: Into<String>,
-    {
-        let mut state = msgs::UserState::new();
-        state.set_comment(text.into());
-        self.connectors.cp_tx().send(state.into()).await.unwrap();
-    }
-
-    pub fn user(&self) -> UserRef {
-        self.session
-    }
-
-    pub fn get_user(&self, r: UserRef) -> Option<User> {
-        self.server_state
-            .lock()
-            .unwrap()
-            .user(r.session_id())
-            .cloned()
-    }
-
-    pub fn channel(&self) -> ChannelRef {
-        let lock = self.server_state.lock().unwrap();
-
-        let user = self.session.get(&lock).unwrap();
-        user.channel()
-    }
-
-    pub fn max_message_length(&self) -> Option<u32> {
-        self.server_state.lock().unwrap().max_message_length()
-    }
-
-    pub fn allow_html_messages(&self) -> Option<bool> {
-        todo!()
-    }
-
-    pub fn audio_input(&self) -> NodeIndex {
-        self.connectors.audio_input()
-    }
-
-    pub async fn close(mut self) {
-        let _ = self.stop_notify.send(());
-
-        for fut in self.tasks.drain(..) {
-            fut.await.unwrap();
-        }
-    }
-}
-
-impl Drop for MumbleClient {
-    fn drop(&mut self) {
-        let _ = self.stop_notify.send(());
+        self.broadcast_message(
+            ev.channels.iter().cloned().collect(),
+            users.into_iter().collect(),
+            text.into(),
+        )
+        .await
     }
 }
 
@@ -220,8 +172,7 @@ fn get_version_packet() -> msgs::Version {
     msg.set_os(info.name().unwrap_or_else(|| "unknown".to_string()));
     msg.set_os_version(format!(
         "{}; {}",
-        info.os_version()
-            .unwrap_or_else(|| "unknown".to_string()),
+        info.os_version().unwrap_or_else(|| "unknown".to_string()),
         info.kernel_version()
             .unwrap_or_else(|| "unknown".to_string())
     ));
