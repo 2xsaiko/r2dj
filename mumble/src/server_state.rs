@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use bit_set::BitSet;
 use mumble_protocol::control::msgs;
-use tokio::sync::broadcast;
+use async_broadcast as broadcast;
+use futures::SinkExt;
 
 use msgtools::Ac;
 
@@ -174,7 +175,7 @@ impl ServerState {
         if state.has_channel_id() {
             let new = ChannelRef::new(state.get_channel_id());
             if user.channel != new {
-                let _ = self.event_subscriber.send(Event::UserMoved(UserMoved {
+                let _ = self.event_subscriber.broadcast(Event::UserMoved(UserMoved {
                     user: user.to_ref(),
                     old_channel: user.channel,
                     new_channel: new,

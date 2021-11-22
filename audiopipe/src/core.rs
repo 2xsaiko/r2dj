@@ -9,7 +9,7 @@ use std::time::Duration;
 use dasp::ring_buffer::Bounded;
 use dasp::{Frame, Signal};
 use dasp_graph::{process, BoxedNodeSend, Buffer, Input, NodeData};
-use futures::Sink;
+use futures::{Sink, StreamExt};
 use log::warn;
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
@@ -142,7 +142,7 @@ impl Core {
     pub fn new(sample_rate: u32) -> Self {
         let data = Arc::new(Mutex::new(CoreData::new()));
         let c = Core { data, sample_rate };
-        tokio::spawn(c.clone().run());
+        async_std::task::spawn(c.clone().run());
         c
     }
 
@@ -161,13 +161,13 @@ impl Core {
     }
 
     async fn run(self) {
-        let mut interval = tokio::time::interval(Duration::from_secs_f64(
+        let mut interval = async_std::stream::interval(Duration::from_secs_f64(
             Buffer::LEN as f64 / self.sample_rate as f64,
         ));
         // let buffer_rate = self.sample_rate as usize / Buffer::LEN;
 
         loop {
-            interval.tick().await;
+            interval.next().await;
             let mut data = self.data.lock().unwrap();
             data.tick();
         }

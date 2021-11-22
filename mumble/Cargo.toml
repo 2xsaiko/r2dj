@@ -11,11 +11,18 @@ edition = "2021"
 audiopipe = { path = "../audiopipe" }
 msgtools = { path = "../msgtools" }
 
-mumble-protocol = "0.4.1"
+mumble-protocol = { package = "mumble-protocol-2x", default-features = false, features = ["openssl", "asynchronous-codec"] }
 tokio = { version = "1.2.0", features = ["full"] }
 tokio-rustls = "0.22.0"
-rustls = "0.19.0"
-webpki-roots = "0.21.0"
+async-std = "1.10.0"
+async-tls = "0.11.0"
+async-compat = "0.2.1"
+async-broadcast = "0.3.4"
+asynchronous-codec = "0.6.0"
+rustls = "0.19.1" # async-tls needs this...
+rustls-pemfile = "0.2.1"
+webpki = "0.22.0"
+webpki-roots = "0.21.1"
 thiserror = "1.0.24"
 tokio-util = { version = "0.6.3", features = ["net"] }
 futures = "0.3.13"
@@ -31,3 +38,6 @@ bit-set = "0.5.2"
 dasp = { version = "0.11.0", features = ["signal", "ring_buffer"] }
 dasp_graph = "0.11.0"
 petgraph = "0.5.1"
+
+[dev-dependencies]
+async-std = { version = "1.10.0", features = [ "attributes" ] }

@@ -5,15 +5,18 @@ use std::ops::{ControlFlow, Try};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use async_broadcast as broadcast;
+use async_std::stream::interval;
+use async_std::sync::Mutex as AsyncMutex;
+use futures::channel::mpsc;
+use futures::select;
+use futures::stream::Fuse;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use log::{debug, error};
 use mumble_protocol::control::{msgs, ControlPacket};
 use mumble_protocol::voice::VoicePacket;
 use mumble_protocol::{Clientbound, Serverbound};
 use petgraph::graph::NodeIndex;
-use tokio::select;
-use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
-use tokio::time::interval;
 
 use audiopipe::OutputSignal;
 use encoder::encoder;
@@ -27,18 +30,23 @@ mod encoder;
 
 pub struct State<T, U> {
     pipe: MumbleClientReceiver,
-    tcp: T,
-    udp: U,
+    tcp: Fuse<T>,
+    udp: Fuse<U>,
     peer: SocketAddr,
     server_state: Ac<ServerState>,
     event_chan: broadcast::Sender<Event>,
+    event_sub: broadcast::InactiveReceiver<Event>,
     audio_seq: u64,
     output: Arc<AsyncMutex<OutputSignal>>,
     output_id: NodeIndex,
     me: UserRef,
 }
 
-impl<T, U> State<T, U> {
+impl<T, U> State<T, U>
+where
+    T: Stream,
+    U: Stream,
+{
     pub fn new(
         pipe: MumbleClientReceiver,
         tcp: T,
@@ -48,17 +56,19 @@ impl<T, U> State<T, U> {
         server_state: Ac<ServerState>,
         me: UserRef,
     ) -> Self {
-        let (event_chan, _) = broadcast::channel(20);
+        let (event_chan, event_sub) = broadcast::broadcast(20);
+        let event_sub = event_sub.deactivate();
         let output_id = output.node();
         let output = Arc::new(AsyncMutex::new(output));
 
         State {
             pipe,
-            tcp,
-            udp,
+            tcp: tcp.fuse(),
+            udp: udp.fuse(),
             peer,
             server_state,
             event_chan,
+            event_sub,
             audio_seq: 0,
             output,
             output_id,
@@ -89,21 +99,25 @@ where
 {
     pub async fn handle_messages(mut self) {
         let (voice_tx, mut voice_rx) = mpsc::channel(20);
-        let mut ping_timer = interval(Duration::from_secs(2));
+        let mut ping_timer = interval(Duration::from_secs(2)).fuse();
         let mut close_callback = None;
 
-        tokio::spawn(encoder(voice_tx, self.output.clone()));
+        let encoder_handle = async_std::task::spawn(encoder(voice_tx, self.output.clone()));
 
         loop {
             select! {
-                _timestamp = ping_timer.tick() => {
+                _timestamp = ping_timer.next() => {
                     if !self.send_ping().await {
+                        dbg!();
                         break;
                     }
                 }
                 msg = self.pipe.next() => {
                     let msg = match msg {
-                        None => break,
+                        None => {
+                            dbg!();
+                            break;
+                        }
                         Some(v) => v,
                     };
 
@@ -156,7 +170,7 @@ where
                             let _ = callback.send(self.output_id);
                         }
                         MumbleClientMessage::EventSubscriber { callback } => {
-                            let _ = callback.send(self.event_chan.subscribe());
+                            let _ = callback.send(self.event_sub.activate_cloned());
                         }
                         MumbleClientMessage::Close { callback } => {
                             close_callback = Some(callback);
@@ -164,9 +178,12 @@ where
                         }
                     }
                 }
-                voice_packet = voice_rx.recv() => {
+                voice_packet = voice_rx.next() => {
                     let voice_packet = match voice_packet {
-                        None => break,
+                        None => {
+                            dbg!();
+                            break;
+                        }
                         Some(v) => v,
                     };
 
@@ -185,7 +202,10 @@ where
                 }
                 msg = self.tcp.next() => {
                     let msg = match msg {
-                        None => break,
+                        None => {
+                            dbg!();
+                            break;
+                        }
                         Some(v) => v,
                     };
 
@@ -201,7 +221,10 @@ where
                 }
                 msg = self.udp.next() => {
                     let msg = match msg {
-                        None => break,
+                        None => {
+                            dbg!();
+                            break;
+                        }
                         Some(v) => v,
                     };
 
@@ -219,6 +242,7 @@ where
 
         let _ = self.tcp.close().await;
         let _ = self.udp.close().await;
+        encoder_handle.cancel().await;
 
         if let Some(close_callback) = close_callback {
             let _ = close_callback.send(());
@@ -310,7 +334,7 @@ where
             message,
         });
 
-        let _ = self.event_chan.send(event);
+        let _ = self.event_chan.broadcast(event);
     }
 
     fn handle_server_config(&mut self, msg: msgs::ServerConfig) {

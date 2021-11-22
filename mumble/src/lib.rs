@@ -2,6 +2,9 @@
 
 use std::path::Path;
 
+use async_broadcast as broadcast;
+use async_std::net::UdpSocket;
+use asynchronous_codec::Framed;
 use futures::stream::StreamExt;
 use futures::SinkExt;
 use log::info;
@@ -9,13 +12,10 @@ use mumble_protocol::control::{msgs, ClientControlCodec};
 use mumble_protocol::crypt::ClientCryptState;
 use petgraph::graph::NodeIndex;
 use sysinfo::SystemExt;
-use tokio::net::UdpSocket;
-use tokio::sync::broadcast;
-use tokio_util::codec::Decoder;
-use tokio_util::udp::UdpFramed;
 
 use audiopipe::Core;
 use msgtools::{proxy, Ac};
+use udp::UdpFramed;
 
 use crate::connect::{HandshakeState, ResultAction};
 pub use crate::event::Event;
@@ -25,6 +25,7 @@ mod connect;
 pub mod event;
 mod server_state;
 mod tasks;
+mod udp;
 
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -60,6 +61,7 @@ impl MumbleClient {
         ac: &Core,
     ) -> Result<Self, ()> {
         info!("Connecting to {}, port {}", host, port);
+
         if let Some(certfile) = &certfile {
             info!("Using certificate '{}'", certfile.as_ref().display());
         }
@@ -68,9 +70,10 @@ impl MumbleClient {
             .await
             .expect("failed to connect to server");
 
-        let peer_addr = stream.get_ref().0.peer_addr().unwrap();
+        let peer_addr = stream.get_ref().peer_addr().unwrap();
+        let local_addr = stream.get_ref().local_addr().unwrap();
 
-        let mut tcp = ClientControlCodec::new().framed(stream);
+        let mut tcp = Framed::new(stream, ClientControlCodec::new());
 
         tcp.send(get_version_packet().into()).await.unwrap();
 
@@ -80,7 +83,7 @@ impl MumbleClient {
         tcp.send(msg.into()).await.unwrap();
 
         let mut handshake_state = HandshakeState::default();
-        let (tx, _) = broadcast::channel(20);
+        let (tx, rx) = broadcast::broadcast(20);
         let mut server_state = Ac::new(ServerState::new(tx.clone()));
 
         let result: Option<(ClientCryptState, u32)> = loop {
@@ -103,7 +106,7 @@ impl MumbleClient {
             Some(cs) => cs,
         };
 
-        let udp_socket = UdpSocket::bind(tcp.get_ref().get_ref().0.local_addr().unwrap())
+        let udp_socket = UdpSocket::bind(local_addr)
             .await
             .expect("failed to open UDP socket");
         let udp = UdpFramed::new(udp_socket, cs);
@@ -119,7 +122,7 @@ impl MumbleClient {
             server_state,
             UserRef::new(session_id),
         );
-        tokio::spawn(state.handle_messages());
+        async_std::task::spawn(state.handle_messages());
 
         Ok(client)
     }

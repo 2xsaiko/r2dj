@@ -1,22 +1,24 @@
 use std::convert::TryInto;
-use std::sync::Arc;
+use std::io::Cursor;
+use std::path::Path;
 
+use async_std::net::TcpStream;
+use async_tls::client::TlsStream;
+use async_tls::TlsConnector;
 use log::{debug, error, info};
 use mumble_protocol::control::{msgs, ControlPacket};
 use mumble_protocol::crypt::ClientCryptState;
 use mumble_protocol::Clientbound;
+use rustls::{Certificate, ClientConfig, PrivateKey};
 use thiserror::Error;
-use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
-use tokio_rustls::rustls::ClientConfig;
-use tokio_rustls::webpki::DNSNameRef;
-use tokio_rustls::TlsConnector;
 
 use crate::server_state::ServerState;
-use std::path::Path;
-use std::io::Cursor;
 
-pub async fn connect(domain: &str, ip: u16, certfile: Option<impl AsRef<Path>>) -> Result<TlsStream<TcpStream>, ConnectError> {
+pub async fn connect(
+    domain: &str,
+    port: u16,
+    certfile: Option<impl AsRef<Path>>,
+) -> Result<TlsStream<TcpStream>, ConnectError> {
     let mut config = ClientConfig::new();
     config
         .root_store
@@ -24,20 +26,18 @@ pub async fn connect(domain: &str, ip: u16, certfile: Option<impl AsRef<Path>>) 
 
     if let Some(certfile) = certfile {
         let certfile = certfile.as_ref();
-        let content = tokio::fs::read(certfile).await.unwrap();
+        let content = async_std::fs::read(certfile).await.unwrap();
         let mut cursor = Cursor::new(&content);
-        let certs = rustls::internal::pemfile::certs(&mut cursor).unwrap();
+        let certs = rustls_pemfile::certs(&mut cursor).unwrap().into_iter().map(Certificate).collect();
         let mut cursor = Cursor::new(&content);
-        let mut pks = rustls::internal::pemfile::pkcs8_private_keys(&mut cursor).unwrap();
+        let pk = rustls_pemfile::pkcs8_private_keys(&mut cursor).unwrap().into_iter().map(PrivateKey).next().unwrap();
 
-        config.set_single_client_cert(certs, pks.remove(0)).unwrap();
+        config.set_single_client_cert(certs, pk).unwrap();
     }
 
-    let stream = TcpStream::connect(format!("{}:{}", domain, ip)).await?;
-    let connector = TlsConnector::from(Arc::new(config));
-    Ok(connector
-        .connect(DNSNameRef::try_from_ascii_str(domain)?, stream)
-        .await?)
+    let stream = TcpStream::connect(format!("{}:{}", domain, port)).await?;
+    let connector = TlsConnector::from(config);
+    Ok(connector.connect(domain, stream).await?)
 }
 
 #[derive(Default)]
@@ -157,8 +157,6 @@ fn handle_crypt_setup(msg: &msgs::CryptSetup) -> Result<ClientCryptState, CryptS
 pub enum ConnectError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Invalid DNS name")]
-    Dns(#[from] tokio_rustls::webpki::InvalidDNSNameError),
 }
 
 #[derive(Debug, Error)]

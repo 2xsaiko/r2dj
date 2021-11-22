@@ -1,18 +1,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_std::stream::interval;
+use async_std::sync::Mutex;
 use audiopus::{Application, Channels, SampleRate};
 use bytes::Bytes;
 use dasp::sample::ToSample;
 use dasp::{Frame, Sample, Signal};
-use log::debug;
+use futures::channel::mpsc;
+use futures::{SinkExt, StreamExt};
 use mumble_protocol::voice::VoicePacketPayload;
-use tokio::select;
-use tokio::sync::{mpsc, Mutex};
-use tokio::time;
 
 pub(super) async fn encoder<S>(
-    voice_tx: mpsc::Sender<VoicePacketPayload>,
+    mut voice_tx: mpsc::Sender<VoicePacketPayload>,
     pipe: Arc<Mutex<S>>,
     // mut stop_recv: watch::Receiver<()>,
 ) where
@@ -34,50 +34,41 @@ pub(super) async fn encoder<S>(
     let encoder =
         audiopus::coder::Encoder::new(sample_rate, Channels::Mono, Application::Audio).unwrap();
 
-    let mut interval = time::interval(Duration::from_millis(ms_buf_size as u64));
+    let mut interval = interval(Duration::from_millis(ms_buf_size as u64));
 
-    let op = async move {
-        let mut last_was_empty = true;
+    let mut last_was_empty = true;
 
-        loop {
-            interval.tick().await;
+    loop {
+        interval.next().await;
 
-            let mut is_empty = true;
+        let mut is_empty = true;
 
-            for (idx, frame) in pipe.by_ref().take(pcm_buf.len()).enumerate() {
-                // adjust volume
-                // let frame = frame.map(|s| s.to_sample() as i16).scale_amp(0.1);
+        for (idx, frame) in pipe.by_ref().take(pcm_buf.len()).enumerate() {
+            // adjust volume
+            // let frame = frame.map(|s| s.to_sample() as i16).scale_amp(0.1);
 
-                // TODO: handle more than left channel
-                let ch0 = frame.channel(0).unwrap();
-                let sample = ch0.to_sample().scale_amp(0.1);
+            // TODO: handle more than left channel
+            let ch0 = frame.channel(0).unwrap();
+            let sample = ch0.to_sample().scale_amp(0.1);
 
-                if sample != 0 {
-                    is_empty = false;
-                }
-
-                pcm_buf[idx] = sample;
+            if sample != 0 {
+                is_empty = false;
             }
 
-            if !(is_empty && last_was_empty) {
-                let len = encoder.encode(&pcm_buf, &mut opus_buf).unwrap();
-
-                let _ = voice_tx
-                    .send(VoicePacketPayload::Opus(
-                        Bytes::copy_from_slice(&opus_buf[..len]),
-                        is_empty,
-                    ))
-                    .await;
-            }
-
-            last_was_empty = is_empty;
+            pcm_buf[idx] = sample;
         }
-    };
 
-    select! {
-        _ = op => {}
-        // _ = stop_recv.changed() => {}
+        if !(is_empty && last_was_empty) {
+            let len = encoder.encode(&pcm_buf, &mut opus_buf).unwrap();
+
+            let _ = voice_tx
+                .send(VoicePacketPayload::Opus(
+                    Bytes::copy_from_slice(&opus_buf[..len]),
+                    is_empty,
+                ))
+                .await;
+        }
+
+        last_was_empty = is_empty;
     }
-
-    debug!("encoder exit");
 }
