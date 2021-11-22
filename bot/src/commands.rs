@@ -3,6 +3,8 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use clap::{App, AppSettings, Arg};
+use log::debug;
+use uuid::Uuid;
 
 use msgtools::Ac;
 
@@ -45,6 +47,7 @@ async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) -
             "list" => list(bot, ev, args).await?,
             "new" => new(bot, ev, args).await?,
             "newsub" => newsub(bot, ev, args).await?,
+            "web" => web(bot, ev, args).await?,
             "quit" => quit(bot, ev, args).await?,
             _ => {}
         }
@@ -245,6 +248,37 @@ async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) -> Resu
         .proxy()
         .add_playlist(Ac::new(Playlist::new()), path)
         .await?;
+
+    Ok(())
+}
+
+async fn web(bot: &mut Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
+    let matches = app_for_command("web")
+        .about("Open the web control interface")
+        .try_get_matches_from(args.iter());
+    unwrap_matches!(matches, bot, ev);
+
+    if let Some(actor) = ev.actor {
+        let user = actor.get(&*bot.client.state().await?);
+
+        let user = match user {
+            None => {
+                // wtf
+                bot.client.respond(ev, "couldn't find your user data, please reconnect").await?;
+                return Ok(());
+            }
+            Some(v) => v,
+        };
+
+        let token = Uuid::new_v4();
+
+        debug!("login token {} for user {}", token, user.name());
+
+        // TODO!
+        let webroot_url = "https://r2dj.2x.ax";
+
+        bot.client.message_user(actor, &format!("<a href=\"{}/login?token={}\">Login</a> (this does not work yet)", webroot_url, token)).await?;
+    }
 
     Ok(())
 }
