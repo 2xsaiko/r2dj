@@ -95,7 +95,6 @@ where
         tokio::spawn(encoder(voice_tx, self.output.clone()));
 
         loop {
-            debug!("boop!");
             select! {
                 _timestamp = ping_timer.tick() => {
                     if !self.send_ping().await {

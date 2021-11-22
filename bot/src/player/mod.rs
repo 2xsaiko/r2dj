@@ -108,7 +108,7 @@ impl Room {
 }
 
 impl RoomService {
-    fn get_next(&mut self) -> Option<Track> {
+    fn next(&mut self) -> Option<Track> {
         // TODO song queuing
         self.playlist.next().map(|x| x.clone()).ok()
     }
@@ -123,7 +123,7 @@ impl RoomService {
             false
         };
 
-        let tr = self.get_next();
+        let tr = self.next();
 
         if let Some(tr) = tr {
             let path = tr.providers().first().unwrap().media_path().await.unwrap();
