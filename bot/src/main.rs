@@ -8,15 +8,16 @@ use std::time::{Duration, Instant};
 
 use futures::channel::oneshot;
 use futures::{FutureExt, StreamExt};
-use log::{debug, info, LevelFilter};
+use log::{debug, info, warn, LevelFilter};
 use simplelog::{Config, TerminalMode};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::ConnectOptions;
+use thiserror::Error;
 use tokio::time::interval;
 use uuid::Uuid;
 
 use audiopipe::Core;
-use msgtools::Ac;
+use msgtools::{proxy, Ac};
 use mumble::{MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
 
@@ -125,7 +126,13 @@ async fn main() {
                 debug!("{:?}", ev);
 
                 match ev {
-                    mumble::Event::Message(ev) => commands::handle_message_event(&mut bot, &ev).await,
+                    mumble::Event::Message(ev) => {
+                        let result = commands::handle_message_event(&mut bot, &ev).await;
+
+                        if let Err(e) = result {
+                            warn!("failed to handle message: {}", e);
+                        }
+                    },
                     _ => {}
                 }
             }
@@ -346,4 +353,12 @@ fn load_config() -> LaunchConfig {
         mumble_cert,
         name: name.unwrap_or_else(|| "r2dj".to_string()),
     }
+}
+
+pub type Result<T = (), E = Error> = std::result::Result<T, E>;
+
+#[derive(Error, Debug, Clone)]
+pub enum Error {
+    #[error("proxy call failed: {0}")]
+    ProxyError(#[from] proxy::Error),
 }

@@ -8,33 +8,30 @@ use msgtools::Ac;
 
 use crate::db::entity::{playlist, Playlist};
 use crate::player::treepath::TreePathBuf;
-use crate::Bot;
+use crate::{Bot, Result};
 
 const COMMAND_PREFIX: char = ';';
 
-pub async fn handle_message_event(bot: &mut Bot, ev: &mumble::event::Message) {
+pub async fn handle_message_event(bot: &mut Bot, ev: &mumble::event::Message) -> Result {
     let name: Cow<_> = match ev.actor {
         None => "<unknown>".into(),
-        Some(r) => bot
-            .client
-            .get_user(r)
-            .await
-            .unwrap()
-            .unwrap()
-            .name()
-            .to_string()
-            .into(),
+        Some(r) => match bot.client.get_user(r).await? {
+            None => "<unknown>".into(),
+            Some(user) => user.name().to_string().into(),
+        },
     };
 
     println!("{}: {}", name, ev.message);
 
     if let Some(msg) = ev.message.strip_prefix(COMMAND_PREFIX) {
         let msg = msg.trim();
-        handle_command(bot, ev, msg).await;
+        handle_command(bot, ev, msg).await?;
     }
+
+    Ok(())
 }
 
-async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) {
+async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) -> Result {
     let cmds = tokenize(msg);
 
     for cmdline in cmds {
@@ -42,16 +39,18 @@ async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) {
         let args = &cmdline[1..];
 
         match cmd {
-            "skip" => skip(bot, ev, args).await,
-            "pause" => pause(bot, ev, args).await,
-            "play" => play(bot, ev, args).await,
-            "list" => list(bot, ev, args).await,
-            "new" => new(bot, ev, args).await,
-            "newsub" => newsub(bot, ev, args).await,
-            "quit" => quit(bot, ev, args).await,
+            "skip" => skip(bot, ev, args).await?,
+            "pause" => pause(bot, ev, args).await?,
+            "play" => play(bot, ev, args).await?,
+            "list" => list(bot, ev, args).await?,
+            "new" => new(bot, ev, args).await?,
+            "newsub" => newsub(bot, ev, args).await?,
+            "quit" => quit(bot, ev, args).await?,
             _ => {}
         }
     }
+
+    Ok(())
 }
 
 fn app_for_command(name: &'static str) -> App {
@@ -68,42 +67,47 @@ macro_rules! unwrap_matches {
                 let text = format!("{}", e).replace('&', "&amp;").replace('<', "&lt;");
                 $bot.client
                     .respond(&$ev, &format!("<pre>{}</pre>", text))
-                    .await
-                    .unwrap();
-                return;
+                    .await?;
+                return Ok(());
             }
         };
     };
 }
 
-async fn skip(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
+async fn skip(bot: &Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
     let matches = app_for_command("skip")
         .about("Skip the currently playing track")
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    let _ = bot.room.proxy().next().await;
+    bot.room.proxy().next().await?;
+
+    Ok(())
 }
 
-async fn pause(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
+async fn pause(bot: &Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
     let matches = app_for_command("pause")
         .about("Pause the currently playing track")
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    let _ = bot.room.proxy().pause().await;
+    bot.room.proxy().pause().await?;
+
+    Ok(())
 }
 
-async fn play(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
+async fn play(bot: &Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
     let matches = app_for_command("play")
         .about("Start playing the current track")
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, bot, ev);
 
-    let _ = bot.room.proxy().play().await;
+    bot.room.proxy().play().await?;
+
+    Ok(())
 }
 
-async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
+async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
     let matches = app_for_command("list")
         .about("List entries of the current playlist")
         .args(&[
@@ -126,13 +130,12 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         Err(e) => {
             bot.client
                 .respond(ev, &format!("failed to get playlist: {}", e))
-                .await
-                .unwrap();
-            return;
+                .await?;
+            return Ok(());
         }
     };
 
-    let max_length = bot.client.max_message_length();
+    let max_length = bot.client.max_message_length().await;
 
     let mut message = String::new();
 
@@ -179,10 +182,12 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
 
     writeln!(message, "</table>").unwrap();
 
-    bot.client.respond(&ev, &message).await.unwrap();
+    bot.client.respond(&ev, &message).await?;
+
+    Ok(())
 }
 
-async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
+async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
     let matches = app_for_command("new")
         .about("Create a new playlist")
         .args(&[
@@ -203,10 +208,12 @@ async fn new(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         playlist.set_title(name);
     }
 
-    let _ = bot.room.proxy().set_playlist(playlist).await;
+    bot.room.proxy().set_playlist(playlist).await?;
+
+    Ok(())
 }
 
-async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
+async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
     let matches = app_for_command("newsub")
         .about("Attach a new sub-playlist")
         .args(&[
@@ -228,22 +235,30 @@ async fn newsub(bot: &Bot, ev: &mumble::event::Message, args: &[String]) {
         Err(e) => {
             bot.client
                 .respond(ev, &format!("error: {}: {}", e, path))
-                .await.unwrap();
-            return;
+                .await?;
+            return Ok(());
         }
     };
 
     bot.room
         .proxy()
         .add_playlist(Ac::new(Playlist::new()), path)
-        .await
-        .unwrap();
+        .await?;
+
+    Ok(())
 }
 
-async fn quit(bot: &mut Bot, _ev: &mumble::event::Message, _args: &[String]) {
+async fn quit(bot: &mut Bot, ev: &mumble::event::Message, args: &[String]) -> Result {
+    let matches = app_for_command("quit")
+        .about("Shut down the bot")
+        .try_get_matches_from(args.iter());
+    unwrap_matches!(matches, bot, ev);
+
     if let Some(tx) = bot.shutdown_fuse.take() {
         let _ = tx.send(());
     }
+
+    Ok(())
 }
 
 // TODO: make this in cmdparser public so I don't have to copy it
