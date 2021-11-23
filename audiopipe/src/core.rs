@@ -24,8 +24,8 @@ type Processor = dasp_graph::Processor<Graph>;
 #[derive(Debug)]
 enum Node {
     NoOp,
-    Input { node: BoxedNodeSend, channels: u8 },
-    Output { node: BoxedNodeSend, channels: u8 },
+    Input { node: InputNode, channels: u8 },
+    Output { node: OutputNode, channels: u8 },
     Boxed(BoxedNodeSend),
 }
 
@@ -75,7 +75,7 @@ impl CoreData {
     fn add_input_to(&mut self, output: Option<NodeIndex>) -> AudioSource {
         let shared = Arc::new(AudioSourceShared {
             running: AtomicBool::new(false),
-            data: Mutex::new(AudioSourceShared1 {
+            data: Mutex::new(AudioSourceBuffer {
                 buffer: Bounded::from(vec![[0.0; 2]; 512]),
                 write_waker: None,
             }),
@@ -83,9 +83,9 @@ impl CoreData {
 
         let node = self.graph.add_node(NodeData::new(
             Node::Input {
-                node: BoxedNodeSend::new(InputNode {
+                node: InputNode {
                     shared: shared.clone(),
-                }),
+                },
                 channels: 2u8,
             },
             vec![Buffer::default(); 2],
@@ -105,9 +105,9 @@ impl CoreData {
 
         let node = self.graph.add_node(NodeData::new(
             Node::Output {
-                node: BoxedNodeSend::new(OutputNode {
+                node: OutputNode {
                     shared: shared.clone(),
-                }),
+                },
                 channels: 2u8,
             },
             vec![Buffer::default(); 2],
@@ -179,11 +179,11 @@ type SampleBuffer = Bounded<Vec<[f32; 2]>>;
 #[derive(Debug)]
 struct AudioSourceShared {
     running: AtomicBool,
-    data: Mutex<AudioSourceShared1>,
+    data: Mutex<AudioSourceBuffer>,
 }
 
 #[derive(Debug)]
-struct AudioSourceShared1 {
+struct AudioSourceBuffer {
     buffer: SampleBuffer,
     write_waker: Option<Waker>,
 }
@@ -275,6 +275,7 @@ impl Sink<[f32; 2]> for AudioSource {
     }
 }
 
+#[derive(Debug)]
 struct InputNode {
     shared: Arc<AudioSourceShared>,
 }
@@ -317,6 +318,7 @@ struct OutputNodeShared {
     buffer: Bounded<Vec<[f32; 2]>>,
 }
 
+#[derive(Debug)]
 struct OutputNode {
     shared: Arc<Mutex<OutputNodeShared>>,
 }
