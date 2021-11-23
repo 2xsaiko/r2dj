@@ -190,7 +190,6 @@ dependencies = [
  "log 0.4.14",
  "petgraph",
  "pin-project-lite 0.2.7",
- "tokio 1.5.0",
 ]
 
 [[package]]

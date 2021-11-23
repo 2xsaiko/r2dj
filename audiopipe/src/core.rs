@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dasp::ring_buffer::Bounded;
 use dasp::{Frame, Signal};
@@ -142,7 +142,12 @@ impl Core {
     pub fn new(sample_rate: u32) -> Self {
         let data = Arc::new(Mutex::new(CoreData::new()));
         let c = Core { data, sample_rate };
-        tokio::spawn(c.clone().run());
+
+        {
+            let c = c.clone();
+            std::thread::spawn(move || c.run());
+        }
+
         c
     }
 
@@ -160,16 +165,20 @@ impl Core {
         self.data.lock().unwrap().add_output()
     }
 
-    async fn run(self) {
-        let mut interval = tokio::time::interval(Duration::from_secs_f64(
-            Buffer::LEN as f64 / self.sample_rate as f64,
-        ));
-        // let buffer_rate = self.sample_rate as usize / Buffer::LEN;
+    fn run(self) {
+        let mut target = Instant::now();
+        let delay = Duration::from_secs_f64(Buffer::LEN as f64 / self.sample_rate as f64);
 
         loop {
-            interval.tick().await;
             let mut data = self.data.lock().unwrap();
             data.tick();
+
+            target += delay;
+            let sleep_time = target.checked_duration_since(Instant::now());
+
+            if let Some(sleep_time) = sleep_time {
+                std::thread::sleep(sleep_time);
+            }
         }
     }
 }
