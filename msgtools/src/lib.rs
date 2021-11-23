@@ -7,3 +7,4 @@ pub use autocow::Ac;
 
 pub mod autocow;
 pub mod proxy;
+pub mod sync_proxy;
