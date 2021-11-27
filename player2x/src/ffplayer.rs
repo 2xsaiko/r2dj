@@ -223,9 +223,7 @@ struct Recoder<T> {
 
 impl<T> Recoder<T> {
     pub fn new(inner: T) -> Self {
-        Recoder {
-            inner,
-        }
+        Recoder { inner }
     }
 }
 

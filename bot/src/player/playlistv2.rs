@@ -196,11 +196,7 @@ impl PlaylistTracker {
         }
     }
 
-    pub fn add_track(
-        &mut self,
-        track: Track,
-        parent: impl AsRef<TreePath>,
-    ) -> Result<(), Track> {
+    pub fn add_track(&mut self, track: Track, parent: impl AsRef<TreePath>) -> Result<(), Track> {
         self.playlist.add_track(track, parent)
     }
 

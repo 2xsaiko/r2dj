@@ -181,11 +181,17 @@ macro_rules! impl_object {
 macro_rules! check_out_of_date {
     ($table:ident, $save:expr, $db:expr) => {
         // language=SQL
-        let old_modified =
-            sqlx::query!(concat!("SELECT modified FROM ", stringify!($table), " WHERE id = $1"), save.id())
-                .fetch_one(&mut *$db)
-                .await?
-                .modified;
+        let old_modified = sqlx::query!(
+            concat!(
+                "SELECT modified FROM ",
+                stringify!($table),
+                " WHERE id = $1"
+            ),
+            save.id()
+        )
+        .fetch_one(&mut *$db)
+        .await?
+        .modified;
 
         match ($save.header().modified_at(), old_modified) {
             (Some(my_mtime), Some(db_mtime)) => {

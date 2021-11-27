@@ -3,11 +3,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
+use crate::db::entity::track::{Source, TrackProvider};
 use thiserror::Error;
 use tokio::process::Command;
 use url::Url;
 use uuid::Uuid;
-use crate::db::entity::track::{TrackProvider, Source};
 
 impl TrackProvider {
     pub async fn media_path(&self) -> Result<Cow<'_, Path>, GetFileError> {

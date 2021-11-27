@@ -9,7 +9,12 @@ use uuid::Uuid;
 
 pub fn create_migration(name: &str, dir: &Path) -> anyhow::Result<()> {
     let now = Utc::now();
-    let dirname = format!("{}-{}", now.format("%Y%m%d%H%M%S"), name.replace(|c: char| !c.is_ascii_alphanumeric(), "-").to_lowercase());
+    let dirname = format!(
+        "{}-{}",
+        now.format("%Y%m%d%H%M%S"),
+        name.replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+            .to_lowercase()
+    );
     println!("Creating migration '{}' at '{}'", name, dirname);
 
     let uuid = Uuid::new_v4();
@@ -31,10 +36,16 @@ pub fn create_migration(name: &str, dir: &Path) -> anyhow::Result<()> {
     writeln!(props, "name {}", cmdparser::escape(name))?;
     writeln!(props, "date {}", now.timestamp())?;
 
-    writeln!(apply, "-- Write SQL here that applies the changes to the database you want, starting")?;
+    writeln!(
+        apply,
+        "-- Write SQL here that applies the changes to the database you want, starting"
+    )?;
     writeln!(apply, "-- from the previous migration point.")?;
 
-    writeln!(unapply, "-- Write SQL here that undoes the changes done in apply.sql, back to the")?;
+    writeln!(
+        unapply,
+        "-- Write SQL here that undoes the changes done in apply.sql, back to the"
+    )?;
     writeln!(unapply, "-- previous migration point.")?;
 
     Ok(())

@@ -13,10 +13,14 @@ use tokio_rustls::webpki::DNSNameRef;
 use tokio_rustls::TlsConnector;
 
 use crate::server_state::ServerState;
-use std::path::Path;
 use std::io::Cursor;
+use std::path::Path;
 
-pub async fn connect(domain: &str, ip: u16, certfile: Option<impl AsRef<Path>>) -> Result<TlsStream<TcpStream>, ConnectError> {
+pub async fn connect(
+    domain: &str,
+    ip: u16,
+    certfile: Option<impl AsRef<Path>>,
+) -> Result<TlsStream<TcpStream>, ConnectError> {
     let mut config = ClientConfig::new();
     config
         .root_store

@@ -1,7 +1,7 @@
-use dasp::{Signal, Frame};
+use dasp::interpolate::linear::Linear;
 use dasp::sample::Duplex;
 use dasp::signal::interpolate::Converter;
-use dasp::interpolate::linear::Linear;
+use dasp::{Frame, Signal};
 
 pub struct Tap<S> {
     running: bool,
@@ -9,8 +9,8 @@ pub struct Tap<S> {
 }
 
 impl<S> Signal for Tap<S>
-    where
-        S: Signal,
+where
+    S: Signal,
 {
     type Frame = S::Frame;
 
@@ -47,10 +47,10 @@ pub struct Limiter<S> {
 }
 
 impl<S, T> Limiter<S>
-    where
-        S: Signal,
-        S::Frame: Frame<Sample = T>,
-        T: Duplex<f64>,
+where
+    S: Signal,
+    S::Frame: Frame<Sample = T>,
+    T: Duplex<f64>,
 {
     pub fn resample(mut self, rate: u32) -> Limiter<Converter<S, Linear<S::Frame>>> {
         let s1 = self.signal.next();
