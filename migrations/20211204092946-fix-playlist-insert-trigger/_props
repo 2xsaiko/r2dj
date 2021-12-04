@@ -1,0 +1,4 @@
+// Auto-generated migration metadata. Do not edit.
+id   eaa5bfecf2814e9fb50f475892d55b9f
+name "Fix playlist insert trigger"
+date 1638610186
