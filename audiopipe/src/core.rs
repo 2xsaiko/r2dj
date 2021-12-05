@@ -2,7 +2,7 @@ use std::cmp::min;
 use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
@@ -24,8 +24,8 @@ type Processor = dasp_graph::Processor<Graph>;
 #[derive(Debug)]
 enum Node {
     NoOp,
-    Input { node: BoxedNodeSend, channels: u8 },
-    Output { node: BoxedNodeSend, channels: u8 },
+    Input { node: InputNode, channels: u8 },
+    Output { node: OutputNode, channels: u8 },
     Boxed(BoxedNodeSend),
 }
 
@@ -83,9 +83,9 @@ impl CoreData {
 
         let node = self.graph.add_node(NodeData::new(
             Node::Input {
-                node: BoxedNodeSend::new(InputNode {
-                    shared: shared.clone(),
-                }),
+                node: InputNode {
+                    shared: Arc::downgrade(&shared),
+                },
                 channels: 2u8,
             },
             vec![Buffer::default(); 2],
@@ -105,9 +105,9 @@ impl CoreData {
 
         let node = self.graph.add_node(NodeData::new(
             Node::Output {
-                node: BoxedNodeSend::new(OutputNode {
+                node: OutputNode {
                     shared: shared.clone(),
-                }),
+                },
                 channels: 2u8,
             },
             vec![Buffer::default(); 2],
@@ -123,6 +123,14 @@ impl CoreData {
     }
 
     fn tick(&mut self) {
+        // clean up all dropped nodes
+        self.graph.retain_nodes(|data, idx| match &data[idx].node {
+            Node::NoOp => true,
+            Node::Input { node, .. } => node.shared.strong_count() > 0,
+            Node::Output { .. } => true,
+            Node::Boxed(_) => true,
+        });
+
         process(&mut self.processor, &mut self.graph, self.bottom);
     }
 
@@ -275,14 +283,20 @@ impl Sink<[f32; 2]> for AudioSource {
     }
 }
 
+#[derive(Debug)]
 struct InputNode {
-    shared: Arc<AudioSourceShared>,
+    shared: Weak<AudioSourceShared>,
 }
 
 impl dasp_graph::Node for InputNode {
     fn process(&mut self, _inputs: &[Input], output: &mut [Buffer]) {
-        if self.shared.running.load(Ordering::Relaxed) {
-            let mut data = self.shared.data.lock().unwrap();
+        let shared = match self.shared.upgrade() {
+            None => return,
+            Some(v) => v,
+        };
+
+        if shared.running.load(Ordering::Relaxed) {
+            let mut data = shared.data.lock().unwrap();
             let mut underflow = 0;
 
             for i in 0..Buffer::LEN {
@@ -317,6 +331,7 @@ struct OutputNodeShared {
     buffer: Bounded<Vec<[f32; 2]>>,
 }
 
+#[derive(Debug)]
 struct OutputNode {
     shared: Arc<Mutex<OutputNodeShared>>,
 }

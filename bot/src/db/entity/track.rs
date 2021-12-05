@@ -8,6 +8,8 @@ use uuid::Uuid;
 
 use crate::db::{object, objgen};
 
+mod import;
+
 #[derive(Debug, Clone)]
 pub struct Track {
     object: object::Track,
@@ -51,6 +53,19 @@ impl Track {
         track.object = object::Track::load(id, db).await?;
         track.load_more(db).await?;
         Ok(track)
+    }
+
+    pub fn set_title(&mut self, title: Option<String>) {
+        self.object.set_title(title);
+    }
+
+    pub fn title(&self) -> Option<&str> {
+        self.object.title()
+    }
+
+    pub fn add_provider(&mut self, source: Source) {
+        let id = Uuid::new_v4();
+        self.providers.push(TrackProvider { id, source });
     }
 
     pub fn providers(&self) -> &[TrackProvider] {
@@ -103,8 +118,27 @@ impl Track {
     }
 
     pub async fn save(&mut self, db: &mut PgConnection) -> objgen::Result<PgQueryResult> {
-        let mut ta = db.begin().await?;
-        let r = self.object.save(&mut ta).await?;
+        let mut r = self.object.save(db).await?;
+
+        // language=SQL
+        r.extend([sqlx::query!(
+            "DELETE FROM track_provider WHERE track = $1",
+            self.object.id()
+        )
+        .execute(&mut *db)
+        .await?]);
+
+        for p in self.providers.iter() {
+            let (local_path, url, spotify_id, youtube_id) = match &p.source {
+                Source::Local(v) => (Some(v.to_str().unwrap()), None, None, None),
+                Source::Url(v) => (None, Some(v.as_str()), None, None),
+                Source::Spotify(v) => (None, None, Some(v), None),
+                Source::Youtube(v) => (None, None, None, Some(v)),
+            };
+
+            // language=SQL
+            r.extend([sqlx::query!("INSERT INTO track_provider (id, track, local_path, url, spotify_id, youtube_id) VALUES ($1, $2, $3, $4, $5, $6)", p.id, self.object.id(), local_path, url, spotify_id, youtube_id).execute(&mut *db).await?]);
+        }
 
         Ok(r)
     }

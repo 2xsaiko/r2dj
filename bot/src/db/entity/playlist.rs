@@ -1,11 +1,13 @@
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use sqlx::postgres::PgQueryResult;
-use sqlx::{Acquire, PgConnection};
+use sqlx::{PgConnection};
 use uuid::Uuid;
 
 use crate::db::{entity, object, objgen};
 use crate::player::treepath::TreePath;
+
+mod import;
 
 #[derive(Debug, Clone)]
 pub struct Playlist {
@@ -23,10 +25,15 @@ impl Playlist {
         pl
     }
 
-    pub fn load(id: Uuid, db: &mut PgConnection) -> BoxFuture<sqlx::Result<Self>> {
+    pub async fn load(id: Uuid, db: &mut PgConnection) -> sqlx::Result<Self> {
+        let object = object::Playlist::load(id, db).await?;
+        Playlist::load_from(object, db).await
+    }
+
+    fn load_from(object: object::Playlist, db: &mut PgConnection) -> BoxFuture<sqlx::Result<Self>> {
         async move {
             let mut playlist = Playlist::new();
-            playlist.object = object::Playlist::load(id, db).await?;
+            playlist.object = object;
             playlist.load_more(db).await?;
             Ok(playlist)
         }
@@ -37,6 +44,14 @@ impl Playlist {
 impl Playlist {
     pub fn set_title(&mut self, title: impl Into<String>) {
         self.object.set_title(title);
+    }
+
+    pub fn set_spotify_id(&mut self, id: Option<impl Into<String>>) {
+        self.object.set_spotify_id(id);
+    }
+
+    pub fn set_youtube_id(&mut self, id: Option<impl Into<String>>) {
+        self.object.set_youtube_id(id);
     }
 
     pub fn push_track(&mut self, track: entity::Track) {
@@ -206,8 +221,7 @@ impl Playlist {
         db: &'a mut PgConnection,
     ) -> BoxFuture<'a, objgen::Result<PgQueryResult>> {
         async move {
-            let mut ta = db.begin().await?;
-            let mut r = self.object.save(&mut ta).await?;
+            let mut r = self.object.save(db).await?;
             let id = self.object.id().unwrap();
 
             // for now, remove everything and re-insert for simplicity
@@ -217,7 +231,7 @@ impl Playlist {
             // language=SQL
             r.extend([
                 sqlx::query!("DELETE FROM playlist_entry WHERE playlist = $1", id)
-                    .execute(&mut ta)
+                    .execute(&mut *db)
                     .await?,
             ]);
 
@@ -225,7 +239,7 @@ impl Playlist {
                 // language=SQL
                 match &mut entry.content {
                     Content::Track(track) => {
-                        r.extend([track.save(&mut ta).await?]);
+                        r.extend([track.save(db).await?]);
 
                         r.extend([sqlx::query!(
                             "INSERT INTO playlist_entry (id, playlist, index, track) VALUES ($1, $2, $3, $4)",
@@ -234,11 +248,11 @@ impl Playlist {
                             idx as u32,
                             track.object().id().unwrap()
                         )
-                        .execute(&mut ta)
+                        .execute(&mut *db)
                         .await?]);
                     }
                     Content::Playlist(playlist) => {
-                        r.extend([playlist.save(&mut ta).await?]);
+                        r.extend([playlist.save(db).await?]);
 
                         r.extend([sqlx::query!(
                             "INSERT INTO playlist_entry (id, playlist, index, track) VALUES ($1, $2, $3, $4)",
@@ -247,13 +261,12 @@ impl Playlist {
                             idx as u32,
                             playlist.object().id().unwrap()
                         )
-                        .execute(&mut ta)
+                        .execute(&mut *db)
                         .await?]);
                     }
                 }
             }
 
-            ta.commit().await?;
             Ok(r)
         }.boxed()
     }

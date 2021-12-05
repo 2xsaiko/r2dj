@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::io;
 use std::net::SocketAddr;
@@ -18,10 +19,11 @@ use tokio::time::interval;
 use audiopipe::OutputSignal;
 use encoder::encoder;
 use msgtools::Ac;
+use html_parser::{Dom, Node};
 
 use crate::event::{Event, Message};
 use crate::server_state::{ChannelRef, ServerState, UserRef};
-use crate::{MumbleClientMessage, MumbleClientReceiver};
+use crate::{MessageError, MumbleClientMessage, MumbleClientReceiver};
 
 mod encoder;
 
@@ -108,15 +110,31 @@ where
                     };
 
                     match msg {
-                        MumbleClientMessage::BroadcastMessage { channels, users, text, callback } => {
-                            let mut m = msgs::TextMessage::new();
-                            m.mut_channel_id()
-                                .extend(channels.into_iter().map(|el| el.id()));
-                            m.mut_session()
-                                .extend(users.into_iter().map(|el| el.session_id()));
-                            m.set_message(text.to_string());
-                            try_or_break!(self.tcp.send(m.into()).await);
-                            let _ = callback.send(());
+                        MumbleClientMessage::BroadcastMessageChecked { channels, users, text, callback } => {
+                            // this is awful, I know
+                            let mut too_long = false;
+                            let mut max_len = 0;
+
+                            if let Some(l) = self.server_state.max_message_length() {
+                                max_len = l;
+
+                                if text.len() > l as usize {
+                                    too_long = true;
+                                }
+                            }
+
+                            if too_long {
+                                let _ = callback.send(Err(MessageError::MessageTooLong(text.len(), max_len as usize)));
+                            } else {
+                                let mut m = msgs::TextMessage::new();
+                                m.mut_channel_id()
+                                    .extend(channels.into_iter().map(|el| el.id()));
+                                m.mut_session()
+                                    .extend(users.into_iter().map(|el| el.session_id()));
+                                m.set_message(text.to_string());
+                                try_or_break!(self.tcp.send(m.into()).await);
+                                let _ = callback.send(Ok(()));
+                            }
                         }
                         MumbleClientMessage::SetComment { comment, callback } => {
                             let mut state = msgs::UserState::new();
@@ -302,12 +320,47 @@ where
             .map(|v| ChannelRef::new(*v))
             .collect();
         let message = msg.take_message();
+        let dom = match html_parser::Dom::parse(&message) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("failed to parse message: {}", e);
+                return;
+            }
+        };
+
+        println!("{:?}", dom);
+
+        fn dom_to_string(nodes: &[html_parser::Node], buf: &mut String) {
+            for node in nodes {
+                match node {
+                    Node::Text(s) => {
+                        html_escape::decode_html_entities_to_string(&s, buf);
+                    }
+                    Node::Element(el) => {
+                        dom_to_string(&el.children, buf);
+                    }
+                    Node::Comment(c) => {}
+                }
+
+                if !buf.ends_with(' ') {
+                    buf.push(' ');
+                }
+            }
+        }
+
+        let mut buf = String::new();
+        dom_to_string(&dom.children, &mut buf);
+
+        while buf.ends_with(' ') {
+            buf.pop();
+        }
 
         let event = Event::Message(Message {
             actor,
             receivers,
             channels,
-            message,
+            message: buf,
+            html_message: message,
         });
 
         let _ = self.event_chan.send(event);

@@ -4,11 +4,12 @@ use std::path::Path;
 
 use futures::stream::StreamExt;
 use futures::SinkExt;
-use log::info;
+use log::{info, warn};
 use mumble_protocol::control::{msgs, ClientControlCodec};
 use mumble_protocol::crypt::ClientCryptState;
 use petgraph::graph::NodeIndex;
 use sysinfo::SystemExt;
+use thiserror::Error;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 use tokio_util::codec::Decoder;
@@ -35,7 +36,7 @@ pub struct MumbleConfig {
 
 proxy! {
     pub proxy MumbleClient {
-        pub async fn broadcast_message(channels: Vec<ChannelRef>, users: Vec<UserRef>, text: String);
+        pub async fn broadcast_message_checked(channels: Vec<ChannelRef>, users: Vec<UserRef>, text: String) -> Result<(), MessageError>;
         pub async fn set_comment(comment: String);
         pub async fn my_user() -> Ac<User>;
         pub async fn my_user_ref() -> UserRef;
@@ -49,6 +50,12 @@ proxy! {
         pub async fn event_subscriber() -> broadcast::Receiver<Event>;
         pub async fn close();
     }
+}
+
+#[derive(Error, Debug, Clone, Eq, Ord, PartialOrd, PartialEq, Hash)]
+pub enum MessageError {
+    #[error("message too long: {0} > {1}")]
+    MessageTooLong(usize, usize),
 }
 
 impl MumbleClient {
@@ -122,6 +129,22 @@ impl MumbleClient {
         tokio::spawn(state.handle_messages());
 
         Ok(client)
+    }
+
+    pub async fn broadcast_message(
+        &self,
+        channels: Vec<ChannelRef>,
+        users: Vec<UserRef>,
+        text: String,
+    ) -> proxy::Result {
+        if let Err(e) = self
+            .broadcast_message_checked(channels, users, text)
+            .await?
+        {
+            warn!("failed to send message: {}", e);
+        }
+
+        Ok(())
     }
 
     pub async fn message_my_channel(&self, text: &str) -> proxy::Result {

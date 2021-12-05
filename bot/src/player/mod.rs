@@ -19,7 +19,6 @@ pub use playlistv2::*;
 
 use crate::db::entity::{Playlist, Track};
 
-pub mod import;
 // mod playlist;
 mod playlistv2;
 mod track;
@@ -114,14 +113,10 @@ impl RoomService {
     }
 
     async fn skip(&mut self) {
-        let playing = if let Some(player) = self.player.take() {
+        if let Some(player) = self.player.take() {
             // TODO: remove audio output from ac
-            let p = player.is_playing().await;
             player.pause().await;
-            p
-        } else {
-            false
-        };
+        }
 
         let tr = self.next();
 
@@ -131,9 +126,7 @@ impl RoomService {
             let player = Player::new(path, out).unwrap();
             self.player_receiver = Some(player.event_listener());
 
-            if playing {
-                player.play().await;
-            }
+            player.play().await;
 
             let length = player.length();
 

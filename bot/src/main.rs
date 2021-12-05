@@ -2,7 +2,6 @@ use std::cmp::min;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -11,13 +10,12 @@ use futures::{FutureExt, StreamExt};
 use log::{debug, info, warn, LevelFilter};
 use simplelog::{Config, TerminalMode};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::ConnectOptions;
+use sqlx::{ConnectOptions, PgPool};
 use thiserror::Error;
 use tokio::time::interval;
-use uuid::Uuid;
 
 use audiopipe::Core;
-use msgtools::{proxy, Ac};
+use msgtools::proxy;
 use mumble::{MumbleClient, MumbleConfig};
 use player2x::ffplayer::PlayerEvent;
 
@@ -62,14 +60,7 @@ async fn main() {
         .await
         .unwrap();
 
-    let id = Uuid::from_str("99b071f7-bdae-48b4-9c0a-aac91332c348").unwrap();
-    let pl = Ac::new(
-        entity::Playlist::load(id, &mut pool.acquire().await.unwrap())
-            .await
-            .unwrap(),
-    );
-
-    println!("{:#?}", pl);
+    let db = pool.acquire().await.unwrap();
 
     let mumble_config = MumbleConfig {
         username: config.name.clone(),
@@ -91,7 +82,6 @@ async fn main() {
 
     let room = Room::new(client.audio_input().await.unwrap(), ac);
     let mut room_events = room.subscribe();
-    let _ = room.proxy().set_playlist(pl).await;
 
     let mut prev_rst = RoomStatus::default();
     let mut rst = RoomStatus::default();
@@ -103,11 +93,9 @@ async fn main() {
     let mut bot = Bot {
         client,
         room,
+        db: pool.clone(),
         shutdown_fuse: Some(shutdown_tx),
     };
-
-    // let mut player = Player::new("04 - Bone Dry.mp3", client.audio_input()).unwrap();
-    // player.play().await;
 
     loop {
         tokio::select! {
@@ -183,6 +171,7 @@ async fn main() {
 pub struct Bot {
     client: MumbleClient,
     room: Room,
+    db: PgPool,
     shutdown_fuse: Option<oneshot::Sender<()>>,
 }
 

@@ -84,6 +84,24 @@ impl Playlist {
         })
     }
 
+    pub async fn load_by_youtube_id(id: &str, db: &mut PgConnection) -> sqlx::Result<Self> {
+        // language=SQL
+        let row = sqlx::query!(
+            "SELECT id, title, created, modified
+             FROM playlist WHERE youtube_id = $1",
+            id
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(Playlist {
+            header: ObjectHeader::from_loaded(row.id, row.created, row.modified),
+            title: row.title,
+            spotify_id: None,
+            youtube_id: Some(id.to_string()),
+        })
+    }
+
     pub async fn save(&mut self, db: &mut PgConnection) -> objgen::Result<PgQueryResult> {
         // using unchecked queries because it wants non-Option spotify_id/youtube_id
 

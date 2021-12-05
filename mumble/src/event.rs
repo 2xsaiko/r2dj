@@ -12,6 +12,7 @@ pub struct Message {
     pub receivers: Vec<UserRef>,
     pub channels: Vec<ChannelRef>,
     pub message: String,
+    pub html_message: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
