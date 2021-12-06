@@ -328,8 +328,6 @@ where
             }
         };
 
-        println!("{:?}", dom);
-
         fn dom_to_string(nodes: &[html_parser::Node], buf: &mut String) {
             for node in nodes {
                 match node {

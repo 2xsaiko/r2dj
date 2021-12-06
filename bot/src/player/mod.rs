@@ -151,8 +151,6 @@ async fn run_room(mut data: RoomService, mut rx: Room1Receiver) {
                     Some(msg) => msg,
                 };
 
-                debug!("{:?}", msg);
-
                 match msg {
                     Room1Message::Play { callback } => {
                         match &data.player {
@@ -192,8 +190,6 @@ async fn run_room(mut data: RoomService, mut rx: Room1Receiver) {
                 }
             }
             ev = player_fut => {
-                debug!("{:?}", ev);
-
                 match ev {
                     Ok(ev) => {
                         match ev {

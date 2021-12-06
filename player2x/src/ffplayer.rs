@@ -122,11 +122,8 @@ impl Player<AudioSource> {
 
         let task = tokio::spawn(async move {
             let pipe = pipe;
-            debug!("1");
             let mut pipe = pipe.lock().await;
-            debug!("2");
             pipe.set_running(true);
-            debug!("3");
 
             let _ = sender.send(PlayerEvent::Playing {
                 now: Instant::now(),
