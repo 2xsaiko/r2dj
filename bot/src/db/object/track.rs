@@ -1,14 +1,17 @@
+use std::fmt::{Display, Formatter};
+
 use chrono::NaiveDate;
-use sqlx::postgres::PgQueryResult;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::db::objgen;
 use crate::db::objgen::ObjectHeader;
+use crate::fmt::HtmlDisplay;
 
 #[derive(Clone, Debug, Default)]
 pub struct Track {
     header: ObjectHeader,
+    code: Option<String>,
     title: Option<String>,
     genre: Option<Uuid>,
     release_date: Option<NaiveDate>,
@@ -19,6 +22,10 @@ impl_detach!(Track);
 impl Track {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn set_code(&mut self, code: impl Into<String>) {
+        self.code = Some(code.into());
     }
 
     pub fn set_title(&mut self, title: Option<String>) {
@@ -55,7 +62,7 @@ impl Track {
     pub async fn load(id: Uuid, db: &mut PgConnection) -> sqlx::Result<Self> {
         // language=SQL
         let row = sqlx::query!(
-            "SELECT title, genre, release_date, created, modified
+            "SELECT code, title, genre, release_date, created, modified
              FROM track WHERE id = $1",
             id
         )
@@ -64,27 +71,30 @@ impl Track {
 
         Ok(Track {
             header: ObjectHeader::from_loaded(id, row.created, row.modified),
+            code: Some(row.code),
             title: row.title,
             genre: row.genre,
             release_date: row.release_date,
         })
     }
 
-    pub async fn save(&mut self, db: &mut PgConnection) -> objgen::Result<PgQueryResult> {
+    pub async fn save(&mut self, db: &mut PgConnection) -> objgen::Result<()> {
         if let Some(save) = self.header.save() {
-            let r = if save.is_new() {
+            if save.is_new() {
                 // language=SQL
-                sqlx::query_unchecked!(
+                let code = sqlx::query_unchecked!(
                     "INSERT INTO track (id, title, genre, release_date, created)
-                     VALUES ($1, $2, $3, $4, $5)",
+                     VALUES ($1, $2, $3, $4, $5)
+                     RETURNING code",
                     save.id(),
                     &self.title,
                     &self.genre,
                     &self.release_date,
                     save.now(),
                 )
-                .execute(&mut *db)
+                .fetch_one(&mut *db)
                 .await?
+                .code;
             } else {
                 // language=SQL
                 let old_modified =
@@ -105,23 +115,44 @@ impl Track {
                 // language=SQL
                 sqlx::query_unchecked!(
                     "UPDATE track
-                     SET title = $2, genre = $3, release_date = $4, modified = $5
+                     SET code = $2, title = $3, genre = $4, release_date = $5, modified = $6
                      WHERE id = $1",
                     save.id(),
+                    &self.code,
                     &self.title,
                     &self.genre,
                     &self.release_date,
                     save.now(),
                 )
                 .execute(&mut *db)
-                .await?
+                .await?;
             };
 
             save.succeed();
-
-            Ok(r)
-        } else {
-            Ok(Default::default())
         }
+
+        Ok(())
+    }
+}
+
+impl Display for Track {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {}",
+            self.code.as_deref().unwrap_or(""),
+            self.title.as_deref().unwrap_or("Unnamed Track")
+        )
+    }
+}
+
+impl HtmlDisplay for Track {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "<code>{}</code> {}",
+            self.code.as_deref().unwrap_or(""),
+            self.title.as_deref().unwrap_or("Unnamed Track")
+        )
     }
 }

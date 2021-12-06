@@ -1,10 +1,12 @@
+use std::fmt::{Display, Formatter};
+
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
-use sqlx::postgres::PgQueryResult;
-use sqlx::{PgConnection};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::db::{entity, object, objgen};
+use crate::fmt::HtmlDisplay;
 use crate::player::treepath::TreePath;
 
 mod import;
@@ -42,6 +44,10 @@ impl Playlist {
 }
 
 impl Playlist {
+    pub fn set_code(&mut self, code: impl Into<String>) {
+        self.object.set_code(code);
+    }
+
     pub fn set_title(&mut self, title: impl Into<String>) {
         self.object.set_title(title);
     }
@@ -216,12 +222,9 @@ impl Playlist {
         Ok(())
     }
 
-    pub fn save<'a>(
-        &'a mut self,
-        db: &'a mut PgConnection,
-    ) -> BoxFuture<'a, objgen::Result<PgQueryResult>> {
+    pub fn save<'a>(&'a mut self, db: &'a mut PgConnection) -> BoxFuture<'a, objgen::Result<()>> {
         async move {
-            let mut r = self.object.save(db).await?;
+            self.object.save(db).await?;
             let id = self.object.id().unwrap();
 
             // for now, remove everything and re-insert for simplicity
@@ -229,19 +232,17 @@ impl Playlist {
             // becomes too slow
 
             // language=SQL
-            r.extend([
-                sqlx::query!("DELETE FROM playlist_entry WHERE playlist = $1", id)
-                    .execute(&mut *db)
-                    .await?,
-            ]);
+            sqlx::query!("DELETE FROM playlist_entry WHERE playlist = $1", id)
+                .execute(&mut *db)
+                .await?;
 
             for (idx, entry) in self.entries.iter_mut().enumerate() {
                 // language=SQL
                 match &mut entry.content {
                     Content::Track(track) => {
-                        r.extend([track.save(db).await?]);
+                        track.save(db).await?;
 
-                        r.extend([sqlx::query!(
+                        sqlx::query!(
                             "INSERT INTO playlist_entry (id, playlist, index, track) VALUES ($1, $2, $3, $4)",
                             entry.id,
                             id,
@@ -249,12 +250,12 @@ impl Playlist {
                             track.object().id().unwrap()
                         )
                         .execute(&mut *db)
-                        .await?]);
+                        .await?;
                     }
                     Content::Playlist(playlist) => {
-                        r.extend([playlist.save(db).await?]);
+                        playlist.save(db).await?;
 
-                        r.extend([sqlx::query!(
+                        sqlx::query!(
                             "INSERT INTO playlist_entry (id, playlist, index, track) VALUES ($1, $2, $3, $4)",
                             entry.id,
                             id,
@@ -262,12 +263,12 @@ impl Playlist {
                             playlist.object().id().unwrap()
                         )
                         .execute(&mut *db)
-                        .await?]);
+                        .await?;
                     }
                 }
             }
 
-            Ok(r)
+            Ok(())
         }.boxed()
     }
 
@@ -296,4 +297,16 @@ impl PlaylistEntry {
 pub enum Content {
     Track(entity::Track),
     Playlist(Playlist),
+}
+
+impl Display for Playlist {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        Display::fmt(&self.object, f)
+    }
+}
+
+impl HtmlDisplay for Playlist {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        HtmlDisplay::fmt(&self.object, f)
+    }
 }

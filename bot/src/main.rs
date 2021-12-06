@@ -1,5 +1,4 @@
 use std::cmp::min;
-use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,6 +29,7 @@ mod config;
 mod db;
 mod player;
 mod spotify;
+mod fmt;
 
 #[tokio::main]
 async fn main() {
@@ -243,7 +243,7 @@ async fn update_status(client: &MumbleClient, prev_st: &mut RoomStatus, st: &Roo
 struct FmtDuration(Duration);
 
 impl Display for FmtDuration {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         let a = self.0.as_secs();
         let secs = a % 60;
         let a = a / 60;

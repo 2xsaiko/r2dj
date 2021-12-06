@@ -11,10 +11,11 @@ use uuid::Uuid;
 
 use msgtools::Ac;
 
-use crate::{Bot, Result};
 use crate::db::entity::{playlist, Playlist};
 use crate::entity::import::ImportError;
+use crate::fmt::HtmlDisplayExt;
 use crate::player::treepath::TreePathBuf;
+use crate::{Bot, Result};
 
 const COMMAND_PREFIX: char = ';';
 
@@ -183,11 +184,7 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String], out: &mut
 
     let max_length = bot.client.max_message_length().await;
 
-    if let Some(id) = pl.object().id() {
-        writeln!(out, "{} ({})", pl.object().title(), id).unwrap();
-    } else {
-        writeln!(out, "{}", pl.object().title()).unwrap();
-    }
+    writeln!(out, "{}", pl.html()).unwrap();
 
     write!(out, "<table><tr><th><u>P</u>os</th><th><u>T</u>itle</th><th><u>A</u>rtist</th><th>A<u>l</u>bum</th></tr>").unwrap();
     write!(out, "<tr><th></th><th></th><th>Shuffle</th></tr>").unwrap();
@@ -249,7 +246,12 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String], out: &mut
     Ok(())
 }
 
-async fn random(bot: &Bot, ev: &mumble::event::Message, args: &[String], out: &mut String) -> Result {
+async fn random(
+    bot: &Bot,
+    ev: &mumble::event::Message,
+    args: &[String],
+    out: &mut String,
+) -> Result {
     let matches = app_for_command("random")
         .about("Toggles random mode on or off")
         .try_get_matches_from(args.iter());
@@ -482,13 +484,7 @@ async fn playlist(
 
             if pl.object().id().is_some() {
                 // existing playlist was loaded from database
-                writeln!(
-                    out,
-                    "found existing playlist in database: {} ({})",
-                    pl.object().title(),
-                    pl.object().id().unwrap()
-                )
-                .unwrap();
+                writeln!(out, "found existing playlist in database: {}", pl.html(),).unwrap();
             } else {
                 if let Some(name) = name {
                     pl.set_title(name);
@@ -499,13 +495,7 @@ async fn playlist(
                     return Ok(());
                 }
 
-                writeln!(
-                    out,
-                    "imported {} ({})",
-                    pl.object().title(),
-                    pl.object().id().unwrap()
-                )
-                .unwrap();
+                writeln!(out, "imported {}", pl.html()).unwrap();
             }
 
             if play {

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::StreamExt;
-use log::{debug, error, warn};
+use log::{error, warn};
 use petgraph::graph::NodeIndex;
 use pin_project_lite::pin_project;
 use tokio::sync::broadcast;

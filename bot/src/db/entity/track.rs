@@ -1,12 +1,13 @@
+use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
 use futures::StreamExt;
-use sqlx::postgres::PgQueryResult;
-use sqlx::{Acquire, PgConnection};
+use sqlx::PgConnection;
 use url::Url;
 use uuid::Uuid;
 
 use crate::db::{object, objgen};
+use crate::fmt::HtmlDisplay;
 
 mod import;
 
@@ -55,6 +56,10 @@ impl Track {
         Ok(track)
     }
 
+    pub fn set_code(&mut self, code: impl Into<String>) {
+        self.object.set_code(code);
+    }
+
     pub fn set_title(&mut self, title: Option<String>) {
         self.object.set_title(title);
     }
@@ -89,8 +94,8 @@ impl Track {
         self.providers.clear();
         // language=SQL
         let mut rows = sqlx::query!(
-            "SELECT id, local_path, url, spotify_id, youtube_id
-             FROM track_provider
+            "SELECT id, local_path, url, spotify_id, youtube_id \
+             FROM track_provider \
              WHERE track = $1",
             id
         )
@@ -117,16 +122,16 @@ impl Track {
         Ok(())
     }
 
-    pub async fn save(&mut self, db: &mut PgConnection) -> objgen::Result<PgQueryResult> {
-        let mut r = self.object.save(db).await?;
+    pub async fn save(&mut self, db: &mut PgConnection) -> objgen::Result<()> {
+        self.object.save(db).await?;
 
         // language=SQL
-        r.extend([sqlx::query!(
+        sqlx::query!(
             "DELETE FROM track_provider WHERE track = $1",
             self.object.id()
         )
         .execute(&mut *db)
-        .await?]);
+        .await?;
 
         for p in self.providers.iter() {
             let (local_path, url, spotify_id, youtube_id) = match &p.source {
@@ -137,13 +142,36 @@ impl Track {
             };
 
             // language=SQL
-            r.extend([sqlx::query!("INSERT INTO track_provider (id, track, local_path, url, spotify_id, youtube_id) VALUES ($1, $2, $3, $4, $5, $6)", p.id, self.object.id(), local_path, url, spotify_id, youtube_id).execute(&mut *db).await?]);
+            sqlx::query!(
+                "INSERT INTO track_provider (id, track, local_path, url, spotify_id, youtube_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+                p.id,
+                self.object.id(),
+                local_path,
+                url,
+                spotify_id,
+                youtube_id
+            )
+            .execute(&mut *db)
+            .await?;
         }
 
-        Ok(r)
+        Ok(())
     }
 
     pub fn object(&self) -> &object::Track {
         &self.object
+    }
+}
+
+impl Display for Track {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        Display::fmt(&self.object, f)
+    }
+}
+
+impl HtmlDisplay for Track {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        HtmlDisplay::fmt(&self.object, f)
     }
 }
