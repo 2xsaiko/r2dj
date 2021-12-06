@@ -6,16 +6,15 @@ use std::str::FromStr;
 
 use clap::{App, AppSettings, Arg};
 use log::debug;
-
 use url::Url;
 use uuid::Uuid;
 
 use msgtools::Ac;
 
+use crate::{Bot, Result};
 use crate::db::entity::{playlist, Playlist};
 use crate::entity::import::ImportError;
 use crate::player::treepath::TreePathBuf;
-use crate::{Bot, Result};
 
 const COMMAND_PREFIX: char = ';';
 
@@ -57,7 +56,7 @@ async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) -
 
         match_commands! {
             cmd, bot, ev, args, out,
-            skip pause play list new newsub web quit
+            skip pause play list random new newsub web quit
             playlist
         }
 
@@ -247,6 +246,23 @@ async fn list(bot: &Bot, ev: &mumble::event::Message, args: &[String], out: &mut
     }
 
     writeln!(out, "</table>").unwrap();
+    Ok(())
+}
+
+async fn random(bot: &Bot, ev: &mumble::event::Message, args: &[String], out: &mut String) -> Result {
+    let matches = app_for_command("random")
+        .about("Toggles random mode on or off")
+        .try_get_matches_from(args.iter());
+    unwrap_matches!(matches, out);
+
+    let new_random = bot.room.proxy().toggle_random().await?;
+
+    if new_random {
+        writeln!(out, "Random mode is now on").unwrap();
+    } else {
+        writeln!(out, "Random mode is now off").unwrap();
+    }
+
     Ok(())
 }
 

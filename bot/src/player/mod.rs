@@ -28,6 +28,7 @@ proxy! {
         pub async fn play();
         pub async fn pause();
         pub async fn next();
+        pub async fn toggle_random() -> bool;
         pub async fn add_to_queue(track: Track);
         pub async fn set_playlist(playlist: Ac<Playlist>);
         pub async fn playlist() -> Ac<Playlist>;
@@ -170,6 +171,11 @@ async fn run_room(mut data: RoomService, mut rx: Room1Receiver) {
                     Room1Message::Next { callback } => {
                         data.skip().await;
                         let _ = callback.send(());
+                    }
+                    Room1Message::ToggleRandom { callback } => {
+                        let new_random = !data.playlist.random();
+                        data.playlist.set_random(new_random);
+                        let _ = callback.send(new_random);
                     }
                     Room1Message::AddToQueue { track, callback } => {
                         warn!("AddToQueue unimplemented");
