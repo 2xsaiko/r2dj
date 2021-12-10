@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
-use sqlx::PgConnection;
+
+use sqlx::postgres::{PgArguments, PgRow};
+use sqlx::{Arguments, FromRow, PgConnection, Row};
 use uuid::Uuid;
 
 use crate::db::objgen::{self, ObjectHeader};
@@ -78,36 +80,39 @@ impl Playlist {
     impl_object!();
 
     pub async fn load(id: Uuid, db: &mut PgConnection) -> sqlx::Result<Self> {
+        let mut args = PgArguments::default();
+        args.add(id);
         // language=SQL
-        let row = sqlx::query!(
-            "SELECT code, title, spotify_id, youtube_id, created, modified
-             FROM playlist WHERE id = $1",
-            id
+        sqlx::query_as_with("SELECT * FROM playlist WHERE id = $1", args)
+            .fetch_one(db)
+            .await
+    }
+
+    pub async fn load_by_code(code: &str, db: &mut PgConnection) -> sqlx::Result<Self> {
+        let mut args = PgArguments::default();
+        args.add(code);
+        // language=SQL
+        sqlx::query_as_with(
+            "SELECT * FROM playlist WHERE code = $1 AND deleted = FALSE",
+            args,
         )
         .fetch_one(db)
-        .await?;
-
-        Ok(Playlist {
-            header: ObjectHeader::from_loaded(id, row.created, row.modified),
-            code: Some(row.code),
-            title: row.title,
-            spotify_id: row.spotify_id,
-            youtube_id: row.youtube_id,
-        })
+        .await
     }
 
     pub async fn load_by_youtube_id(id: &str, db: &mut PgConnection) -> sqlx::Result<Self> {
         // language=SQL
         let row = sqlx::query!(
-            "SELECT id, code, title, created, modified
-             FROM playlist WHERE youtube_id = $1",
-            id
+            "SELECT id, code, title, created, modified \
+             FROM playlist \
+             WHERE youtube_id = $1 AND deleted = false",
+            id,
         )
         .fetch_one(db)
         .await?;
 
         Ok(Playlist {
-            header: ObjectHeader::from_loaded(row.id, row.created, row.modified),
+            header: ObjectHeader::from_loaded(row.id, row.created, row.modified, false),
             code: Some(row.code),
             title: row.title,
             spotify_id: None,
@@ -120,51 +125,78 @@ impl Playlist {
 
         if let Some(save) = self.header.save() {
             if save.is_new() {
+                // TODO macro for this, damn you SQL for not letting me pass DEFAULT as a query param >:(
                 // language=SQL
-                let code = sqlx::query_unchecked!(
-                    "INSERT INTO playlist (id, code, title, spotify_id, youtube_id, created) \
-                     VALUES ($1, $2, $3, $4, $5, $6)
-                     RETURNING code",
-                    save.id(),
-                    &self.code,
-                    &self.title,
-                    &self.spotify_id,
-                    &self.youtube_id,
-                    save.now(),
-                )
-                .fetch_one(&mut *db)
-                .await?
-                .code;
+                let code = match &self.code {
+                    None => {
+                        sqlx::query_unchecked!(
+                            "INSERT INTO playlist (id, code, title, spotify_id, youtube_id, created, deleted) \
+                             VALUES ($1, DEFAULT, $2, $3, $4, $5, $6) \
+                             RETURNING code",
+                            save.id(),
+                            &self.title,
+                            &self.spotify_id,
+                            &self.youtube_id,
+                            save.now(),
+                            save.deleted(),
+                        )
+                        .fetch_one(&mut *db)
+                        .await?
+                        .code
+                    }
+                    Some(code) => {
+                        sqlx::query_unchecked!(
+                            "INSERT INTO playlist (id, code, title, spotify_id, youtube_id, created, deleted) \
+                             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                             RETURNING code",
+                            save.id(),
+                            code,
+                            &self.title,
+                            &self.spotify_id,
+                            &self.youtube_id,
+                            save.now(),
+                            save.deleted(),
+                        )
+                        .fetch_one(&mut *db)
+                        .await?
+                        .code
+                    }
+                };
 
                 self.code = Some(code);
             } else {
                 // language=SQL
-                let old_modified =
-                    sqlx::query!("SELECT modified FROM playlist WHERE id = $1", save.id())
-                        .fetch_one(&mut *db)
-                        .await?
-                        .modified;
+                let db_status = sqlx::query!(
+                    "SELECT modified, deleted FROM playlist WHERE id = $1",
+                    save.id()
+                )
+                .fetch_one(&mut *db)
+                .await?;
 
-                match (save.header().modified_at(), old_modified) {
-                    (Some(my_mtime), Some(db_mtime)) => {
-                        if db_mtime > my_mtime {
-                            return Err(objgen::Error::OutdatedState(db_mtime));
-                        }
+                if let (Some(my_mtime), Some(db_mtime)) =
+                    (save.header().modified_at(), db_status.modified)
+                {
+                    if db_mtime > my_mtime {
+                        return Err(objgen::Error::OutdatedState(db_mtime));
                     }
-                    _ => {}
                 }
 
-                // language=SQL
+                if db_status.deleted {
+                    return Err(objgen::Error::Deleted);
+                }
+
                 sqlx::query_unchecked!(
+                    // language=SQL
                     "UPDATE playlist \
-                     SET code = $2, title = $3, spotify_id = $4, youtube_id = $5, modified = $6 \
+                     SET code = $2, title = $3, spotify_id = $4, youtube_id = $5, modified = $6, deleted = $7 \
                      WHERE id = $1",
                     save.id(),
-                    &self.code,
+                    self.code.as_deref().expect("code must be set"),
                     &self.title,
                     &self.spotify_id,
                     &self.youtube_id,
                     save.now(),
+                    save.deleted(),
                 )
                 .execute(&mut *db)
                 .await?;
@@ -174,6 +206,29 @@ impl Playlist {
         }
 
         Ok(())
+    }
+
+    pub async fn delete(&mut self, db: &mut PgConnection) -> objgen::Result<()> {
+        self.header.mark_deleted();
+        self.save(db).await
+    }
+}
+
+impl<'r> FromRow<'r, PgRow> for Playlist {
+    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+        let header = ObjectHeader::from_row(row)?;
+        let code = row.try_get("code")?;
+        let title = row.try_get("title")?;
+        let spotify_id = row.try_get("spotify_id")?;
+        let youtube_id = row.try_get("youtube_id")?;
+
+        Ok(Playlist {
+            header,
+            code: Some(code),
+            title,
+            spotify_id,
+            youtube_id,
+        })
     }
 }
 
@@ -185,6 +240,11 @@ impl Display for Playlist {
 
 impl HtmlDisplay for Playlist {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "<code>{}</code> {}", self.code.as_deref().unwrap_or(""), self.title)
+        write!(
+            f,
+            "<code>{}</code> {}",
+            self.code.as_deref().unwrap_or(""),
+            self.title
+        )
     }
 }

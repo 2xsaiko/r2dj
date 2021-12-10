@@ -55,6 +55,13 @@ impl Track {
         track.load_more(db).await?;
         Ok(track)
     }
+    
+    pub async fn load_by_code(code: &str, db: &mut PgConnection) -> sqlx::Result<Self> {
+        let mut track = Track::new();
+        track.object = object::Track::load_by_code(code, db).await?;
+        track.load_more(db).await?;
+        Ok(track)
+    }
 
     pub fn set_code(&mut self, code: impl Into<String>) {
         self.object.set_code(code);

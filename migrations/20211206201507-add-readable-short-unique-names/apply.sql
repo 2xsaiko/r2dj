@@ -5,19 +5,19 @@ CREATE SEQUENCE artist_code_seq START 1;
 CREATE SEQUENCE genre_code_seq START 1;
 
 ALTER TABLE track
-    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('track_code_seq'::regclass), '00000000');
+    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('track_code_seq'::regclass), 'FM00000000');
 
 ALTER TABLE playlist
-    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('playlist_code_seq'::regclass), '00000');
+    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('playlist_code_seq'::regclass), 'FM00000');
 
 ALTER TABLE album
-    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('album_code_seq'::regclass), '000000');
+    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('album_code_seq'::regclass), 'FM000000');
 
 ALTER TABLE artist
-    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('artist_code_seq'::regclass), '00000');
+    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('artist_code_seq'::regclass), 'FM00000');
 
 ALTER TABLE genre
-    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('genre_code_seq'::regclass), '00000');
+    ADD COLUMN code TEXT NOT NULL DEFAULT to_char(nextval('genre_code_seq'::regclass), 'FM00000');
 
 ALTER TABLE track
     ADD CONSTRAINT track_code_key UNIQUE (code);

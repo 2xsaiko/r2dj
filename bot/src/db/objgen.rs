@@ -1,17 +1,19 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::postgres::PgQueryResult;
-use sqlx::{Executor, PgPool, Postgres};
+use sqlx::postgres::{PgQueryResult, PgRow};
+use sqlx::{Executor, FromRow, PgPool, Postgres, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("The table was changed by someone else while editing, at {0}")]
+    #[error("the table was changed by someone else while editing, at {0}")]
     OutdatedState(DateTime<Utc>),
-    #[error("Database error: {0}")]
+    #[error("the target object has been deleted")]
+    Deleted,
+    #[error("{0}")]
     Sqlx(#[from] sqlx::Error),
 }
 
@@ -21,6 +23,7 @@ pub struct ObjectHeader {
     modified: bool,
     created_at: Option<DateTime<Utc>>,
     modified_at: Option<DateTime<Utc>>,
+    deleted: bool,
 }
 
 impl ObjectHeader {
@@ -28,12 +31,14 @@ impl ObjectHeader {
         id: Uuid,
         created_at: Option<DateTime<Utc>>,
         modified_at: Option<DateTime<Utc>>,
+        deleted: bool,
     ) -> Self {
         ObjectHeader {
             id: Some(id),
             modified: false,
             created_at,
             modified_at,
+            deleted,
         }
     }
 
@@ -53,8 +58,17 @@ impl ObjectHeader {
         self.modified_at
     }
 
+    pub fn deleted(&self) -> bool {
+        self.deleted
+    }
+
     pub fn mark_changed(&mut self) {
         self.modified = true;
+    }
+
+    pub fn mark_deleted(&mut self) {
+        self.modified = true;
+        self.deleted = true;
     }
 
     pub fn save(&mut self) -> Option<Save> {
@@ -69,6 +83,16 @@ impl ObjectHeader {
                 now,
             })
         }
+    }
+}
+
+impl<'r> FromRow<'r, PgRow> for ObjectHeader {
+    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+        let id = row.try_get("id")?;
+        let created = row.try_get("created")?;
+        let modified = row.try_get("modified")?;
+        let deleted = row.try_get("deleted")?;
+        Ok(ObjectHeader::from_loaded(id, created, modified, deleted))
     }
 }
 
@@ -100,6 +124,10 @@ impl<'a> Save<'a> {
 
     pub fn now(&self) -> DateTime<Utc> {
         self.now
+    }
+
+    pub fn deleted(&self) -> bool {
+        self.header.deleted
     }
 
     pub fn header(&self) -> &ObjectHeader {

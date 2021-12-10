@@ -6,16 +6,20 @@ use std::str::FromStr;
 
 use clap::{App, AppSettings, Arg};
 use log::debug;
+use sqlx::postgres::PgArguments;
+use sqlx::Arguments;
 use url::Url;
 use uuid::Uuid;
 
 use msgtools::Ac;
 
 use crate::db::entity::{playlist, Playlist};
+use crate::db::object;
 use crate::entity::import::ImportError;
 use crate::fmt::HtmlDisplayExt;
-use crate::player::treepath::TreePathBuf;
-use crate::{Bot, Result};
+use crate::player::treepath::{TreePath, TreePathBuf};
+use crate::{Bot, Result, StreamExt};
+use crate::entity::Track;
 
 const COMMAND_PREFIX: char = ';';
 
@@ -57,12 +61,20 @@ async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) -
 
         match_commands! {
             cmd, bot, ev, args, out,
-            skip pause play list random new newsub web quit
+            skip pause play list random new newsub load web quit
             playlist
         }
 
         if !out.is_empty() {
-            let _ = bot.client.respond(ev, out).await;
+            let out1 = out.trim_end();
+
+            let out1 = if out1.contains("\n") {
+                format!("<br>{}", out1.replace("\n", "<br>"))
+            } else {
+                out1.replace("\n", "<br>")
+            };
+
+            let _ = bot.client.respond(ev, &out1).await;
         }
     }
 
@@ -81,7 +93,8 @@ macro_rules! unwrap_matches {
         let $matches = match $matches {
             Ok(v) => v,
             Err(e) => {
-                let text = format!("{}", e).replace('&', "&amp;").replace('<', "&lt;");
+                let text = format!("{}", e);
+                let text = html_escape::encode_text_minimal(&text);
                 writeln!($out, "<pre>{}</pre>", text).unwrap();
                 return Ok(());
             }
@@ -332,19 +345,33 @@ async fn newsub(
     Ok(())
 }
 
-async fn import(
-    bot: &mut Bot,
-    ev: &mumble::event::Message,
-    args: &[String],
-    out: &mut String,
-) -> Result {
-    let matches = app_for_command("import")
-        .about("Import a playlist")
-        .args([Arg::new("url")
-            .value_name("URL")
-            .about("The URL to fetch the playlist from")])
+async fn load(bot: &Bot, ev: &mumble::event::Message, args: &[String], out: &mut String) -> Result {
+    let matches = app_for_command("load")
+        .about("Create a new playlist")
+        .args(&[Arg::new("code")
+            .value_name("CODE")
+            .about("The code of the playlist to load")])
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, out);
+
+    let mut db = match bot.db.acquire().await {
+        Ok(v) => v,
+        Err(e) => {
+            writeln!(out, "failed to acquire database connection: {}", e).unwrap();
+            return Ok(());
+        }
+    };
+
+    let code = matches.value_of("code").unwrap();
+    let playlist = match Playlist::load_by_code(code, &mut *db).await {
+        Ok(v) => v,
+        Err(e) => {
+            writeln!(out, "failed to load playlist: {}", e).unwrap();
+            return Ok(());
+        }
+    };
+
+    bot.room.proxy().set_playlist(Ac::new(playlist)).await?;
 
     Ok(())
 }
@@ -393,11 +420,11 @@ async fn playlist(
                         .value_name("CODE")
                         .about("The code of the playlist to delete")
                         .required(true),
-                    Arg::new("name")
+                    Arg::new("title")
                         .short('n')
-                        .long("name")
-                        .value_name("NAME")
-                        .about("Sets the playlist name to NAME."),
+                        .long("title")
+                        .value_name("TITLE")
+                        .about("Sets the playlist title to TITLE."),
                     Arg::new("track")
                         .short('t')
                         .long("track")
@@ -408,36 +435,53 @@ async fn playlist(
                         .short('s')
                         .long("sync")
                         .about("Syncs the playlist against the configured external source")
+                        .conflicts_with("track"),
                 ]),
             app_for_command("delete")
                 .short_flag('R')
                 .args([
                     Arg::new("code")
                         .value_name("CODE")
-                        .about("The code of the playlist to delete"),
+                        .about("The code of the playlist to delete")
+                        .required(true)
+                        .multiple_values(true),
                 ]),
-            app_for_command("query").short_flag('Q'),
+            app_for_command("query").short_flag('Q')
+                .args([
+                    Arg::new("title")
+                        .short('t')
+                        .long("title")
+                        .value_name("TITLE")
+                        .about("Only shows playlists containing title")
+                        .multiple_occurrences(true),
+                    Arg::new("code")
+                        .short('c')
+                        .long("code")
+                        .value_name("CODE")
+                        .about("Only shows playlists containing code")
+                        .multiple_occurrences(true),
+                ]),
         ])
         .try_get_matches_from(args.iter());
     unwrap_matches!(matches, out);
 
+    let mut db = match bot.db.acquire().await {
+        Ok(v) => v,
+        Err(e) => {
+            writeln!(out, "failed to acquire database connection: {}", e).unwrap();
+            return Ok(());
+        }
+    };
+
     match matches.subcommand() {
         Some(("create", matches)) => {
             let name = matches.value_of("name");
-            let _code = matches.value_of("code");
+            let code = matches.value_of("code");
             let from = matches.value_of("from");
             let force = matches.is_present("force");
             let play = matches.is_present("play");
 
             let mut pl = Playlist::new();
-
-            let mut db = match bot.db.acquire().await {
-                Ok(v) => v,
-                Err(e) => {
-                    writeln!(out, "failed to acquire database connection: {}", e).unwrap();
-                    return Ok(());
-                }
-            };
 
             if let Some(from) = from {
                 let url = match Url::parse(from) {
@@ -486,6 +530,10 @@ async fn playlist(
                 // existing playlist was loaded from database
                 writeln!(out, "found existing playlist in database: {}", pl.html(),).unwrap();
             } else {
+                if let Some(code) = code {
+                    pl.set_code(code);
+                }
+
                 if let Some(name) = name {
                     pl.set_title(name);
                 }
@@ -495,16 +543,116 @@ async fn playlist(
                     return Ok(());
                 }
 
-                writeln!(out, "imported {}", pl.html()).unwrap();
+                if from.is_some() {
+                    writeln!(out, "imported {}", pl.html()).unwrap();
+                } else {
+                    writeln!(out, "created {}", pl.html()).unwrap();
+                }
             }
 
             if play {
                 let _ = bot.room.proxy().set_playlist(Ac::new(pl)).await;
             }
         }
-        Some(("modify", matches)) => {}
-        Some(("delete", matches)) => {}
-        Some(("query", matches)) => {}
+        Some(("modify", matches)) => {
+            let code = matches.value_of("code").unwrap();
+            let title = matches.value_of("title");
+            let track = matches.values_of("track");
+            let sync = matches.is_present("sync");
+
+            let mut playlist = match Playlist::load_by_code(code, &mut *db).await {
+                Ok(v) => v,
+                Err(e) => {
+                    writeln!(out, "failed to load playlist <code>{}</code>: {}", code, e).unwrap();
+                    return Ok(());
+                }
+            };
+
+            if let Some(title) = title {
+                playlist.set_title(title);
+            }
+
+            for track in track.into_iter().flatten() {
+                let track_ent = match Track::load_by_code(track, &mut *db).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        writeln!(out, "failed to load track <code>{}</code>: {}", track, e).unwrap();
+                        return Ok(());
+                    }
+                };
+
+                playlist.add_track(track_ent, TreePathBuf::root()).unwrap();
+            }
+
+            if sync {
+                if playlist.object().youtube_id().is_some() {
+                    if let Err(e) = playlist.update_content_from_youtube(&mut *db).await {
+                        writeln!(out, "failed to update playlist: {}", e).unwrap();
+                        return Ok(());
+                    }
+
+                    writeln!(out, "finished syncing from YouTube").unwrap();
+                } else {
+                    writeln!(out, "playlist {} does not have YouTube remote defined", playlist.html()).unwrap();
+                }
+            }
+
+            if let Err(e) = playlist.save(&mut *db).await {
+                writeln!(out, "failed to save playlist: {}", e).unwrap();
+                return Ok(());
+            }
+        }
+        Some(("delete", matches)) => {
+            for code in matches.values_of("code").into_iter().flatten() {
+                let mut playlist = match object::Playlist::load_by_code(code, &mut *db).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        writeln!(out, "failed to load playlist {}: {}", code, e).unwrap();
+                        continue;
+                    }
+                };
+
+                if let Err(e) = playlist.delete(&mut *db).await {
+                    writeln!(out, "failed to delete playlist {}: {}", code, e).unwrap();
+                    continue;
+                }
+
+                writeln!(out, "deleted playlist {}", playlist.html()).unwrap();
+            }
+        }
+        Some(("query", matches)) => {
+            let mut query = "SELECT * FROM playlist WHERE deleted = false".to_string();
+            let mut argn = 1;
+            let mut args = PgArguments::default();
+
+            for code in matches.values_of("code").into_iter().flatten() {
+                writeln!(query, " AND code LIKE ${}", argn).unwrap();
+                argn += 1;
+                args.add(format!("%{}%", code));
+            }
+
+            for code in matches.values_of("title").into_iter().flatten() {
+                writeln!(query, " AND title LIKE ${}", argn).unwrap();
+                argn += 1;
+                args.add(format!("%{}%", code));
+            }
+
+            writeln!(query, " ORDER BY code").unwrap();
+
+            let mut stream = sqlx::query_as_with(&query, args).fetch(&mut *db);
+
+            while let Some(res) = stream.next().await {
+                let pl: object::Playlist = match res {
+                    Ok(v) => v,
+                    Err(e) => {
+                        writeln!(out, "failed to load playlist: {}", e).unwrap();
+                        return Ok(());
+                    }
+                };
+
+                writeln!(out, "{}", pl.html()).unwrap();
+            }
+        }
         _ => unreachable!(),
     }
 

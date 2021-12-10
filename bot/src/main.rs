@@ -83,7 +83,7 @@ async fn main() {
     let room = Room::new(client.audio_input().await.unwrap(), ac);
     let mut room_events = room.subscribe();
 
-    let mut prev_rst = RoomStatus::default();
+    let mut prev_rst = None;
     let mut rst = RoomStatus::default();
     let mut update_timer = interval(Duration::from_secs(5));
 
@@ -96,6 +96,8 @@ async fn main() {
         db: pool.clone(),
         shutdown_fuse: Some(shutdown_tx),
     };
+
+    update_status(&bot.client, &mut prev_rst, &rst).await;
 
     loop {
         tokio::select! {
@@ -165,7 +167,7 @@ async fn main() {
     }
 
     let _ = bot.client.message_my_channel("quitting!").await;
-    bot.client.close().await.unwrap();
+    let _ = bot.client.close().await;
 }
 
 pub struct Bot {
@@ -204,40 +206,42 @@ impl Default for RoomStatus {
     }
 }
 
-async fn update_status(client: &MumbleClient, prev_st: &mut RoomStatus, st: &RoomStatus) {
-    if !st.should_update(&prev_st) {
-        *prev_st = st.clone();
-        return;
+async fn update_status(client: &MumbleClient, prev_st: &mut Option<RoomStatus>, st: &RoomStatus) {
+    let should_update = match prev_st {
+        None => true,
+        Some(prev_st) => st.should_update(prev_st),
+    };
+
+    if should_update {
+        let state_ch = match st.playing_since {
+            None => "⏸︎",
+            Some(_) => "⏵︎",
+        };
+
+        let current_position = match st.playing_since {
+            None => st.position,
+            Some(then) => {
+                let diff = Instant::now().duration_since(then);
+                min(st.position + diff, st.total_duration)
+            }
+        };
+
+        let str = format!(
+            "{}<br>{}<br>{}<br>[{}] [{} / {}]<hr>{} {}",
+            st.title,
+            st.album_title,
+            st.artist,
+            state_ch,
+            FmtDuration(current_position),
+            FmtDuration(st.total_duration),
+            CRATE_NAME,
+            CRATE_VERSION,
+        );
+
+        client.set_comment(str).await.unwrap();
     }
 
-    let state_ch = match st.playing_since {
-        None => "⏸︎",
-        Some(_) => "⏵︎",
-    };
-
-    let current_position = match st.playing_since {
-        None => st.position,
-        Some(then) => {
-            let diff = Instant::now().duration_since(then);
-            min(st.position + diff, st.total_duration)
-        }
-    };
-
-    let str = format!(
-        "{}<br>{}<br>{}<br>[{}] [{} / {}]<hr>{} {}",
-        st.title,
-        st.album_title,
-        st.artist,
-        state_ch,
-        FmtDuration(current_position),
-        FmtDuration(st.total_duration),
-        CRATE_NAME,
-        CRATE_VERSION,
-    );
-
-    client.set_comment(str).await.unwrap();
-
-    *prev_st = st.clone();
+    *prev_st = Some(st.clone());
 }
 
 struct FmtDuration(Duration);

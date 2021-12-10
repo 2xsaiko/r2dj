@@ -32,6 +32,11 @@ impl Playlist {
         Playlist::load_from(object, db).await
     }
 
+    pub async fn load_by_code(code: &str, db: &mut PgConnection) -> sqlx::Result<Self> {
+        let object = object::Playlist::load_by_code(code, db).await?;
+        Playlist::load_from(object, db).await
+    }
+
     fn load_from(object: object::Playlist, db: &mut PgConnection) -> BoxFuture<sqlx::Result<Self>> {
         async move {
             let mut playlist = Playlist::new();
