@@ -4,7 +4,7 @@ use std::fmt::Write;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-use clap::{App, AppSettings, Arg};
+use clap::{App, AppSettings, Arg, ArgGroup};
 use log::debug;
 use sqlx::postgres::PgArguments;
 use sqlx::Arguments;
@@ -16,10 +16,10 @@ use msgtools::Ac;
 use crate::db::entity::{playlist, Playlist};
 use crate::db::object;
 use crate::entity::import::ImportError;
+use crate::entity::Track;
 use crate::fmt::HtmlDisplayExt;
 use crate::player::treepath::{TreePath, TreePathBuf};
 use crate::{Bot, Result, StreamExt};
-use crate::entity::Track;
 
 const COMMAND_PREFIX: char = ';';
 
@@ -62,7 +62,7 @@ async fn handle_command(bot: &mut Bot, ev: &mumble::event::Message, msg: &str) -
         match_commands! {
             cmd, bot, ev, args, out,
             skip pause play list random new newsub load web quit
-            playlist
+            playlist track
         }
 
         if !out.is_empty() {
@@ -418,7 +418,7 @@ async fn playlist(
                 .args([
                     Arg::new("code")
                         .value_name("CODE")
-                        .about("The code of the playlist to delete")
+                        .about("The code of the playlist to modify")
                         .required(true),
                     Arg::new("title")
                         .short('n')
@@ -452,13 +452,13 @@ async fn playlist(
                         .short('t')
                         .long("title")
                         .value_name("TITLE")
-                        .about("Only shows playlists containing title")
+                        .about("Only shows playlists containing TITLE")
                         .multiple_occurrences(true),
                     Arg::new("code")
                         .short('c')
                         .long("code")
                         .value_name("CODE")
-                        .about("Only shows playlists containing code")
+                        .about("Only shows playlists containing CODE")
                         .multiple_occurrences(true),
                 ]),
         ])
@@ -576,7 +576,8 @@ async fn playlist(
                 let track_ent = match Track::load_by_code(track, &mut *db).await {
                     Ok(v) => v,
                     Err(e) => {
-                        writeln!(out, "failed to load track <code>{}</code>: {}", track, e).unwrap();
+                        writeln!(out, "failed to load track <code>{}</code>: {}", track, e)
+                            .unwrap();
                         return Ok(());
                     }
                 };
@@ -593,7 +594,12 @@ async fn playlist(
 
                     writeln!(out, "finished syncing from YouTube").unwrap();
                 } else {
-                    writeln!(out, "playlist {} does not have YouTube remote defined", playlist.html()).unwrap();
+                    writeln!(
+                        out,
+                        "playlist {} does not have YouTube remote defined",
+                        playlist.html()
+                    )
+                    .unwrap();
                 }
             }
 
@@ -651,6 +657,239 @@ async fn playlist(
                 };
 
                 writeln!(out, "{}", pl.html()).unwrap();
+            }
+        }
+        _ => unreachable!(),
+    }
+
+    Ok(())
+}
+
+async fn track(
+    bot: &mut Bot,
+    ev: &mumble::event::Message,
+    args: &[String],
+    out: &mut String,
+) -> Result {
+    let matches = app_for_command("track")
+        .about("The track management interface")
+        .setting(AppSettings::SubcommandRequiredElseHelp)
+        .subcommands([
+            app_for_command("create")
+                .short_flag('C')
+                .about("Create a new track")
+                .args([
+                    Arg::new("name")
+                        .short('n')
+                        .long("name")
+                        .about("The name of the track to create")
+                        .value_name("NAME"),
+                    Arg::new("code")
+                        .short('c')
+                        .long("code")
+                        .value_name("CODE")
+                        .about("Use the provided code for the track"),
+                    Arg::new("path").short('p').long("path").value_name("PATH"),
+                    Arg::new("youtube")
+                        .short('y')
+                        .long("youtube")
+                        .value_name("URL"),
+                ])
+                .group(ArgGroup::new("source").args(&["path", "youtube"])),
+            app_for_command("modify").short_flag('M').args([
+                Arg::new("code")
+                    .value_name("CODE")
+                    .about("The code of the track to modify")
+                    .required(true),
+                Arg::new("title")
+                    .short('n')
+                    .long("title")
+                    .value_name("TITLE")
+                    .about("Sets the track title to TITLE."),
+            ]),
+            app_for_command("delete")
+                .short_flag('R')
+                .args([Arg::new("code")
+                    .value_name("CODE")
+                    .about("The code of the track to delete")
+                    .required(true)
+                    .multiple_values(true)]),
+            app_for_command("query").short_flag('Q').args([
+                Arg::new("title")
+                    .short('t')
+                    .long("title")
+                    .value_name("TITLE")
+                    .about("Only shows tracks containing TITLE")
+                    .multiple_occurrences(true),
+                Arg::new("code")
+                    .short('c')
+                    .long("code")
+                    .value_name("CODE")
+                    .about("Only shows playlists containing CODE")
+                    .multiple_occurrences(true),
+            ]),
+        ])
+        .try_get_matches_from(args.iter());
+    unwrap_matches!(matches, out);
+
+    let mut db = match bot.db.acquire().await {
+        Ok(v) => v,
+        Err(e) => {
+            writeln!(out, "failed to acquire database connection: {}", e).unwrap();
+            return Ok(());
+        }
+    };
+
+    match matches.subcommand() {
+        Some(("create", matches)) => {
+            let name = matches.value_of("name");
+            let code = matches.value_of("code");
+            let path = matches.value_of("path");
+            let youtube = matches.value_of("youtube");
+
+            let mut track = Track::new();
+
+            if let Some(path) = path {
+                let _ = path;
+                writeln!(out, "importing from a path is unimplemented!").unwrap();
+                return Ok(());
+            } else if let Some(youtube) = youtube {
+                let url = match Url::parse(youtube) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        writeln!(out, "failed to parse URL: {}", e).unwrap();
+                        return Ok(());
+                    }
+                };
+
+                if (url.domain() == Some("www.youtube.com") || url.domain() == Some("youtube.com"))
+                    && url.path() == "/watch"
+                {
+                    let mut video = None;
+
+                    for (k, v) in url.query_pairs() {
+                        if k == "v" {
+                            video = Some(v);
+                        }
+                    }
+
+                    if let Some(video) = video {
+                        let res: Result<_, ImportError> =
+                            Track::import_by_youtube_id(&video, &mut *db).await;
+
+                        match res {
+                            Ok(v) => {
+                                track = v;
+                            }
+                            Err(e) => {
+                                writeln!(out, "failed to import track: {}", e).unwrap();
+                                return Ok(());
+                            }
+                        }
+                    } else {
+                        writeln!(out, "could not parse YouTube video URL").unwrap();
+                        return Ok(());
+                    }
+                } else {
+                    writeln!(out, "don't know how to parse this URL").unwrap();
+                    return Ok(());
+                }
+            }
+
+            if track.object().id().is_some() {
+                // existing track was loaded from database
+                writeln!(out, "found existing track in database: {}", track.html()).unwrap();
+            } else {
+                if let Some(code) = code {
+                    track.set_code(code);
+                }
+
+                if let Some(name) = name {
+                    track.set_title(Some(name.to_string()));
+                }
+
+                if let Err(e) = track.save(&mut *db).await {
+                    writeln!(out, "failed to save track: {}", e).unwrap();
+                    return Ok(());
+                }
+
+                if youtube.is_some() {
+                    writeln!(out, "imported {}", track.html()).unwrap();
+                } else {
+                    writeln!(out, "created {}", track.html()).unwrap();
+                }
+            }
+        }
+        Some(("modify", matches)) => {
+            let code = matches.value_of("code").unwrap();
+            let title = matches.value_of("title");
+
+            let mut track = match Track::load_by_code(code, &mut *db).await {
+                Ok(v) => v,
+                Err(e) => {
+                    writeln!(out, "failed to load playlist <code>{}</code>: {}", code, e).unwrap();
+                    return Ok(());
+                }
+            };
+
+            if let Some(title) = title {
+                track.set_title(Some(title.to_string()));
+            }
+
+            if let Err(e) = track.save(&mut *db).await {
+                writeln!(out, "failed to save track: {}", e).unwrap();
+                return Ok(());
+            }
+        }
+        Some(("delete", matches)) => {
+            for code in matches.values_of("code").into_iter().flatten() {
+                let mut track = match object::Track::load_by_code(code, &mut *db).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        writeln!(out, "failed to load track {}: {}", code, e).unwrap();
+                        continue;
+                    }
+                };
+
+                if let Err(e) = track.delete(&mut *db).await {
+                    writeln!(out, "failed to delete track {}: {}", code, e).unwrap();
+                    continue;
+                }
+
+                writeln!(out, "deleted track {}", track.html()).unwrap();
+            }
+        }
+        Some(("query", matches)) => {
+            let mut query = "SELECT * FROM track WHERE deleted = false".to_string();
+            let mut argn = 1;
+            let mut args = PgArguments::default();
+
+            for code in matches.values_of("code").into_iter().flatten() {
+                writeln!(query, " AND code LIKE ${}", argn).unwrap();
+                argn += 1;
+                args.add(format!("%{}%", code));
+            }
+
+            for code in matches.values_of("title").into_iter().flatten() {
+                writeln!(query, " AND title LIKE ${}", argn).unwrap();
+                argn += 1;
+                args.add(format!("%{}%", code));
+            }
+
+            writeln!(query, " ORDER BY code").unwrap();
+
+            let mut stream = sqlx::query_as_with(&query, args).fetch(&mut *db);
+
+            while let Some(res) = stream.next().await {
+                let t: object::Track = match res {
+                    Ok(v) => v,
+                    Err(e) => {
+                        writeln!(out, "failed to load track: {}", e).unwrap();
+                        return Ok(());
+                    }
+                };
+
+                writeln!(out, "{}", t.html()).unwrap();
             }
         }
         _ => unreachable!(),

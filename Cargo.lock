@@ -3865,9 +3865,8 @@ checksum = "85e60b0d1b5f99db2556934e21937020776a5d31520bf169e851ac44e6420214"
 
 [[package]]
 name = "youtube_dl"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f9da35dcf2f7b27831aff69d7dbcb226dbcbe56522a7cddf75ec1d5b54738bb"
+version = "0.6.3"
+source = "git+https://github.com/GyrosOfWar/youtube-dl-rs.git#a76a03cb4fa34fb6fff2431cc0960e284bdbdb68"
 dependencies = [
  "log",
  "serde",

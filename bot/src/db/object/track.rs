@@ -164,6 +164,11 @@ impl Track {
 
         Ok(())
     }
+
+    pub async fn delete(&mut self, db: &mut PgConnection) -> objgen::Result<()> {
+        self.header.mark_deleted();
+        self.save(db).await
+    }
 }
 
 impl<'r> FromRow<'r, PgRow> for Track {

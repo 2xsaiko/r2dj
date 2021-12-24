@@ -26,7 +26,8 @@ rand = "0.8.3"
 sqlx = { version = "0.5.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "uuid", "macros", "chrono"] }
 url = "2.2.1"
 chrono = "0.4.19"
-youtube_dl = "0.6.1"
+# youtube_dl = { version = "0.6.3", features = ["yt-dlp"] }
+youtube_dl = { git = "https://github.com/GyrosOfWar/youtube-dl-rs.git", default-features = false, features = ["yt-dlp"] }
 num_cpus = "1.13.0"
 pin-project-lite = "0.2.6"
 dasp = "0.11.0"
