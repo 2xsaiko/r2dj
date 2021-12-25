@@ -431,6 +431,12 @@ async fn playlist(
                         .value_name("TRACK")
                         .about("Adds the track with the specified code TRACK")
                         .multiple_occurrences(true),
+                    Arg::new("playlist")
+                        .short('p')
+                        .long("playlist")
+                        .value_name("PLAYLIST")
+                        .about("Adds the playlist with the specified code PLAYLIST")
+                        .multiple_occurrences(true),
                     Arg::new("sync")
                         .short('s')
                         .long("sync")
