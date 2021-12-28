@@ -100,7 +100,7 @@ class App extends Component<Props, State> {
 const tabs: TabData[] = (() => {
     let list = [];
 
-    for (let i = 0; i < 20; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
         list.push({
             key: `${i}`,
             title: `Demo Tab ${i}`,

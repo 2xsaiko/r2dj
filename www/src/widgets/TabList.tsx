@@ -1,16 +1,16 @@
-import { IconButton, NeutralColors, Stack, VerticalDivider } from '@fluentui/react';
+import { IconButton, IStyle, NeutralColors, Stack, VerticalDivider } from '@fluentui/react';
 import React, { Component, CSSProperties, WheelEventHandler } from 'react';
 
-const tabStyle: CSSProperties = {
+const tabStyle: IStyle = {
     height: '32px',
 };
 
-const mouseOverTabStyle: CSSProperties = {
+const mouseOverTabStyle: IStyle = {
     backgroundColor: NeutralColors.gray20,
     ...tabStyle,
 };
 
-const inactiveTabStyle: CSSProperties = {
+const inactiveTabStyle: IStyle = {
     backgroundColor: NeutralColors.gray40,
     ...tabStyle,
 };
@@ -72,31 +72,29 @@ function Tab(props: TabProps) {
     let style = props.active ? tabStyle : props.mouseOver ? mouseOverTabStyle : inactiveTabStyle;
 
     return (
-        <Stack.Item grow style={style}>
-            <Stack
-                horizontal
-                styles={{ root: { height: '100%' } }}
-                verticalAlign="center"
-                onMouseDown={() => props.onActivate()}
-                onMouseEnter={() => props.onMouseEnter()}
-                onMouseLeave={() => props.onMouseLeave()}
-            >
-                <Stack.Item grow style={tabTextStyle}>
-                    {props.tab.title}
+        <Stack
+            horizontal
+            styles={{ root: style }}
+            verticalAlign="center"
+            onMouseDown={() => props.onActivate()}
+            onMouseEnter={() => props.onMouseEnter()}
+            onMouseLeave={() => props.onMouseLeave()}
+        >
+            <Stack.Item grow style={tabTextStyle}>
+                {props.tab.title}
+            </Stack.Item>
+            {props.tab.hideClose ? (
+                []
+            ) : (
+                <Stack.Item>
+                    <IconButton
+                        iconProps={{ iconName: 'ChromeClose' }}
+                        disabled={props.tab.closeDisabled}
+                        onClick={() => props.onClose()}
+                    />
                 </Stack.Item>
-                {props.tab.hideClose ? (
-                    []
-                ) : (
-                    <Stack.Item>
-                        <IconButton
-                            iconProps={{ iconName: 'ChromeClose' }}
-                            disabled={props.tab.closeDisabled}
-                            onClick={() => props.onClose()}
-                        />
-                    </Stack.Item>
-                )}
-            </Stack>
-        </Stack.Item>
+            )}
+        </Stack>
     );
 }
 
@@ -113,15 +111,17 @@ function RawTabList(props: RawTabListProps) {
         }
 
         elements.push(
-            <Tab
-                tab={tab}
-                active={props.selected == tab.key}
-                mouseOver={props.mouseOverTab == tab.key}
-                onActivate={() => props.onActivate?.(tab)}
-                onClose={() => props.onClose?.(tab)}
-                onMouseEnter={() => props.onMouseEnter(tab)}
-                onMouseLeave={() => props.onMouseLeave(tab)}
-            />,
+            <Stack.Item grow>
+                <Tab
+                    tab={tab}
+                    active={props.selected == tab.key}
+                    mouseOver={props.mouseOverTab == tab.key}
+                    onActivate={() => props.onActivate?.(tab)}
+                    onClose={() => props.onClose?.(tab)}
+                    onMouseEnter={() => props.onMouseEnter(tab)}
+                    onMouseLeave={() => props.onMouseLeave(tab)}
+                />
+            </Stack.Item>,
         );
     }
 
@@ -209,29 +209,13 @@ class TabList extends Component<Props, State> {
     }
 
     private updateScrollState() {
-        this.setState({
-            isAtLeft: this.isAtStart(),
-            isAtRight: this.isAtEnd(),
-        });
-    }
-
-    private isAtStart(): boolean {
         let current = this.elem.current;
 
         if (current) {
-            return current.scrollLeft <= 0;
-        } else {
-            return true;
-        }
-    }
-
-    private isAtEnd(): boolean {
-        let current = this.elem.current;
-
-        if (current) {
-            return current.scrollLeft >= current.scrollWidth - current.clientWidth;
-        } else {
-            return true;
+            this.setState({
+                isAtLeft: current.scrollLeft <= 0,
+                isAtRight: current.scrollLeft >= current.scrollWidth - current.clientWidth,
+            });
         }
     }
 
