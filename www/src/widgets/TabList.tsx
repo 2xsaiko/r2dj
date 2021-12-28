@@ -178,22 +178,26 @@ class TabList extends Component<Props, State> {
                         />
                     </div>
                 </Stack.Item>
-                <Stack.Item>
-                    <IconButton
-                        title="Scroll Left"
-                        iconProps={{ iconName: 'CaretLeftSolid8' }}
-                        disabled={this.state.isAtLeft}
-                        onClick={() => this.scrollLeft()}
-                    />
-                </Stack.Item>
-                <Stack.Item>
-                    <IconButton
-                        title="Scroll Right"
-                        iconProps={{ iconName: 'CaretRightSolid8' }}
-                        disabled={this.state.isAtRight}
-                        onClick={() => this.scrollRight()}
-                    />
-                </Stack.Item>
+                {this.state.isAtLeft && this.state.isAtRight
+                    ? []
+                    : [
+                          <Stack.Item>
+                              <IconButton
+                                  title="Scroll Left"
+                                  iconProps={{ iconName: 'CaretLeftSolid8' }}
+                                  disabled={this.state.isAtLeft}
+                                  onClick={() => this.scrollLeft()}
+                              />
+                          </Stack.Item>,
+                          <Stack.Item>
+                              <IconButton
+                                  title="Scroll Right"
+                                  iconProps={{ iconName: 'CaretRightSolid8' }}
+                                  disabled={this.state.isAtRight}
+                                  onClick={() => this.scrollRight()}
+                              />
+                          </Stack.Item>,
+                      ]}
             </Stack>
         );
     }
