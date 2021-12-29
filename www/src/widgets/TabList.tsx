@@ -28,12 +28,10 @@ interface TabData {
     closeDisabled?: boolean;
 }
 
-interface BaseProps {
+interface Props {
     tabs: TabData[];
     selected: string;
-}
 
-interface Props extends BaseProps {
     onClose?(tab: TabData): void;
 
     onActivate?(tab: TabData): void;
